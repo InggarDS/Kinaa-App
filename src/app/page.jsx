@@ -4,8 +4,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { doc, setDoc, collection, onSnapshot, addDoc } from 'firebase/firestore';
-import { 
-  Baby, Timer, Droplet, BarChart2, Play, Pause, Square, Save, 
+import {
+  Baby, Timer, Droplet, BarChart2, Play, Pause, Square, Save,
   Settings, CheckCircle2, Mail, Lock, LogOut, Loader2
 } from 'lucide-react';
 
@@ -29,7 +29,7 @@ export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [appProfile, setAppProfile] = useState(null); // Data profil dari Firestore
   const [logs, setLogs] = useState([]);
-  
+
   // State UI Aplikasi
   const [isAppAuthenticated, setIsAppAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState('home');
@@ -76,7 +76,7 @@ export default function App() {
     }, (error) => console.error("Error fetching profile:", error));
 
     // Listener Logs (hanya jika sudah login aplikasi)
-    let unsubLogs = () => {};
+    let unsubLogs = () => { };
     if (isAppAuthenticated) {
       const logsRef = collection(db, 'artifacts', appId, 'users', firebaseUser.uid, 'logs');
       unsubLogs = onSnapshot(logsRef, (snap) => {
@@ -134,9 +134,9 @@ export default function App() {
   // Tampilan Login / Register (Jika belum terautentikasi di level aplikasi)
   if (!isAppAuthenticated) {
     return (
-      <AuthScreen 
-        firebaseUser={firebaseUser} 
-        appProfile={appProfile} 
+      <AuthScreen
+        firebaseUser={firebaseUser}
+        appProfile={appProfile}
         onAuthSuccess={() => {
           setIsAppAuthenticated(true);
           sessionStorage.setItem('kinaa_auth', 'true');
@@ -149,7 +149,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 sm:pb-0 flex justify-center">
       <div className="w-full max-w-md bg-white min-h-screen shadow-xl relative overflow-hidden flex flex-col">
-        
+
         {/* Header */}
         <header className="bg-rose-500 text-white p-4 shadow-md rounded-b-2xl z-10 flex justify-between items-center">
           <div>
@@ -158,7 +158,7 @@ export default function App() {
               Halo, Bayi {appProfile?.name || 'Kinaa'}
             </p>
           </div>
-          <button 
+          <button
             onClick={handleLogout}
             className="p-2 bg-rose-600 rounded-full hover:bg-rose-700 transition flex items-center shadow-inner"
             title="Keluar"
@@ -198,7 +198,7 @@ export default function App() {
 // --- Komponen Autentikasi (Login & Register) ---
 function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
   const [mode, setMode] = useState(appProfile ? 'login' : 'register');
-  
+
   // Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -216,7 +216,7 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
         const profileRef = doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'profile', 'main');
         await setDoc(profileRef, {
           email: email.toLowerCase(),
-          password, 
+          password,
           name: babyName,
           dob: babyDob,
           createdAt: Date.now()
@@ -251,14 +251,14 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
         <p className="text-sm text-center text-slate-500 mb-8">
           {mode === 'login' ? 'Silakan masuk ke akun Anda' : 'Buat akun untuk menyimpan data bayi Anda'}
         </p>
-        
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Email</label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                type="email" 
+              <input
+                type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition"
@@ -272,8 +272,8 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
             <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Password</label>
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                type="password" 
+              <input
+                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition"
@@ -287,8 +287,8 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
             <div className="pt-2 space-y-4 border-t border-slate-100 mt-2">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Nama Bayi</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={babyName}
                   onChange={(e) => setBabyName(e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition"
@@ -298,8 +298,8 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Tanggal Lahir</label>
-                <input 
-                  type="date" 
+                <input
+                  type="date"
                   value={babyDob}
                   max={new Date().toISOString().split("T")[0]}
                   onChange={(e) => setBabyDob(e.target.value)}
@@ -310,8 +310,8 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
             </div>
           )}
 
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             disabled={isLoading}
             className="w-full bg-rose-500 hover:bg-rose-600 disabled:bg-rose-300 text-white font-bold py-3 px-4 rounded-xl transition-all mt-6 shadow-md shadow-rose-200 flex justify-center items-center"
           >
@@ -322,7 +322,7 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
         <div className="mt-6 text-center">
           <p className="text-sm text-slate-500">
             {mode === 'login' ? 'Belum punya akun?' : 'Sudah punya akun?'}
-            <button 
+            <button
               type="button"
               onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
               className="ml-1 text-rose-500 font-semibold hover:underline"
@@ -340,7 +340,7 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
 
 function NavButton({ icon: Icon, label, isActive, onClick }) {
   return (
-    <button 
+    <button
       onClick={onClick}
       className={`flex flex-col items-center p-2 rounded-xl w-16 transition-all ${isActive ? 'text-rose-500 bg-rose-50' : 'text-slate-400 hover:text-slate-600'}`}
     >
@@ -367,9 +367,9 @@ function Dashboard({ profile, logs }) {
   }, [ageInDays]);
 
   const todayLogs = useMemo(() => {
-    const today = new Date().setHours(0,0,0,0);
+    const today = new Date().setHours(0, 0, 0, 0);
     return logs.filter(log => {
-      const logDate = new Date(log.timestamp).setHours(0,0,0,0);
+      const logDate = new Date(log.timestamp).setHours(0, 0, 0, 0);
       return logDate === today;
     });
   }, [logs]);
@@ -427,7 +427,7 @@ function Dashboard({ profile, logs }) {
                       {log.type === 'volume' ? 'Minum Susu/ASI' : 'Menyusui Langsung'}
                     </p>
                     <p className="text-xs text-slate-400">
-                      {new Date(log.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                      {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </p>
                   </div>
                 </div>
@@ -447,28 +447,57 @@ function TimerTracker({ onSave }) {
   const [mode, setMode] = useState('stopwatch');
   const [time, setTime] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
+  
+  const startTimeRef = useRef(null);
+  const accumulatedRef = useRef(0);
   const timerRef = useRef(null);
+  
   const [manualHours, setManualHours] = useState(0);
   const [manualMins, setManualMins] = useState(0);
 
-  useEffect(() => {
-    if (isRunning) {
-      timerRef.current = setInterval(() => {
-        setTime(prev => prev + 1);
-      }, 1000);
-    } else {
-      clearInterval(timerRef.current);
-    }
-    return () => clearInterval(timerRef.current);
-  }, [isRunning]);
+  const startTimer = () => {
+    setIsRunning(true);
+    startTimeRef.current = Date.now();
+    timerRef.current = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+      setTime(accumulatedRef.current + elapsed);
+    }, 1000);
+  };
+
+  const pauseTimer = () => {
+    setIsRunning(false);
+    clearInterval(timerRef.current);
+    const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+    accumulatedRef.current += elapsed;
+    setTime(accumulatedRef.current);
+  };
+
+  const toggleTimer = () => {
+    if (isRunning) pauseTimer();
+    else startTimer();
+  };
 
   const handleStopAndSave = () => {
-    if (time > 0) {
+    let finalTime = accumulatedRef.current;
+    if (isRunning) {
+      clearInterval(timerRef.current);
+      const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+      finalTime += elapsed;
       setIsRunning(false);
-      onSave(time);
+    }
+    
+    if (finalTime > 0) {
+      onSave(finalTime);
+      accumulatedRef.current = 0;
       setTime(0);
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+  }, []);
 
   const handleSaveManual = () => {
     const totalSeconds = (manualHours * 3600) + (manualMins * 60);
@@ -490,14 +519,14 @@ function TimerTracker({ onSave }) {
   return (
     <div className="flex flex-col h-full space-y-6">
       <div className="flex bg-slate-100 p-1 rounded-xl">
-        <button 
-          onClick={() => setMode('stopwatch')} 
+        <button
+          onClick={() => setMode('stopwatch')}
           className={`flex-1 py-2 text-sm font-semibold rounded-lg transition ${mode === 'stopwatch' ? 'bg-white text-rose-500 shadow-sm' : 'text-slate-500'}`}
         >
           Stopwatch
         </button>
-        <button 
-          onClick={() => setMode('manual')} 
+        <button
+          onClick={() => setMode('manual')}
           className={`flex-1 py-2 text-sm font-semibold rounded-lg transition ${mode === 'manual' ? 'bg-white text-rose-500 shadow-sm' : 'text-slate-500'}`}
         >
           Input Manual
@@ -508,7 +537,7 @@ function TimerTracker({ onSave }) {
         <div className="flex-1 flex flex-col items-center justify-center space-y-10">
           <div className="relative">
             {isRunning && (
-               <div className="absolute inset-0 bg-rose-200 rounded-full animate-ping opacity-50"></div>
+              <div className="absolute inset-0 bg-rose-200 rounded-full animate-ping opacity-50"></div>
             )}
             <div className="w-56 h-56 rounded-full border-8 border-rose-100 bg-white shadow-xl flex flex-col items-center justify-center relative z-10">
               <span className="text-5xl font-mono font-bold text-slate-800 tracking-tighter">
@@ -520,21 +549,21 @@ function TimerTracker({ onSave }) {
 
           <div className="flex space-x-6">
             {!isRunning && time === 0 ? (
-              <button 
-                onClick={() => setIsRunning(true)}
+              <button
+                onClick={startTimer}
                 className="w-20 h-20 bg-teal-500 hover:bg-teal-600 text-white rounded-full flex flex-col items-center justify-center shadow-lg shadow-teal-200 transition-transform transform hover:scale-105 active:scale-95"
               >
                 <Play size={32} className="ml-1" fill="currentColor" />
               </button>
             ) : (
               <>
-                <button 
-                  onClick={() => setIsRunning(!isRunning)}
+                <button
+                  onClick={toggleTimer}
                   className={`w-16 h-16 rounded-full flex items-center justify-center shadow-md transition-transform transform active:scale-95 text-white ${isRunning ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-200' : 'bg-teal-500 hover:bg-teal-600 shadow-teal-200'}`}
                 >
                   {isRunning ? <Pause size={28} fill="currentColor" /> : <Play size={28} className="ml-1" fill="currentColor" />}
                 </button>
-                <button 
+                <button
                   onClick={handleStopAndSave}
                   className="w-16 h-16 bg-rose-500 hover:bg-rose-600 text-white rounded-full flex flex-col items-center justify-center shadow-md shadow-rose-200 transition-transform transform active:scale-95"
                 >
@@ -553,7 +582,7 @@ function TimerTracker({ onSave }) {
             <h3 className="text-center font-bold text-slate-700 mb-6 text-lg">Masukkan Durasi Manual</h3>
             <div className="flex items-center justify-center space-x-4">
               <div className="flex flex-col items-center">
-                <input 
+                <input
                   type="number" min="0"
                   value={manualHours === 0 ? '' : manualHours}
                   onChange={(e) => setManualHours(parseInt(e.target.value) || 0)}
@@ -564,7 +593,7 @@ function TimerTracker({ onSave }) {
               </div>
               <span className="text-3xl font-bold text-slate-300 pb-6">:</span>
               <div className="flex flex-col items-center">
-                <input 
+                <input
                   type="number" min="0" max="59"
                   value={manualMins === 0 ? '' : manualMins}
                   onChange={(e) => setManualMins(parseInt(e.target.value) || 0)}
@@ -575,7 +604,7 @@ function TimerTracker({ onSave }) {
               </div>
             </div>
           </div>
-          <button 
+          <button
             onClick={handleSaveManual}
             disabled={manualHours === 0 && manualMins === 0}
             className="w-full bg-rose-500 disabled:bg-slate-300 text-white font-bold py-4 rounded-2xl shadow-lg transition-colors flex items-center justify-center"
@@ -611,9 +640,9 @@ function VolumeTracker({ onSave }) {
           <Droplet size={32} />
         </div>
         <h3 className="text-center font-bold text-blue-900 mb-4">Volume ASI / Susu</h3>
-        
+
         <div className="flex items-center space-x-2 bg-white rounded-2xl px-6 py-4 shadow-inner w-full max-w-xs">
-          <input 
+          <input
             type="number" min="0"
             value={volume}
             onChange={(e) => setVolume(e.target.value)}
@@ -626,7 +655,7 @@ function VolumeTracker({ onSave }) {
 
       <div className="grid grid-cols-3 gap-3 mt-4">
         {[10, 30, 50, 90, 120, 150].map((amt) => (
-          <button 
+          <button
             key={amt}
             onClick={() => addAmount(amt)}
             className="bg-white border border-slate-200 py-3 rounded-xl text-slate-600 font-semibold shadow-sm hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors flex flex-col items-center"
@@ -638,7 +667,7 @@ function VolumeTracker({ onSave }) {
       </div>
 
       <div className="flex-1 flex items-end mt-6">
-        <button 
+        <button
           onClick={handleSave}
           disabled={!volume || parseInt(volume) <= 0}
           className="w-full bg-blue-500 disabled:bg-slate-300 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-200 transition-colors flex items-center justify-center"
@@ -656,11 +685,11 @@ function ChartView({ profile, logs }) {
     const birthDate = new Date(profile.dob);
     const today = new Date();
     const ageInMonths = Math.abs(today.getTime() - birthDate.getTime()) / (1000 * 60 * 60 * 24 * 30);
-    
+
     if (ageInMonths < 1) return 600;
     if (ageInMonths < 3) return 750;
     if (ageInMonths < 6) return 900;
-    return 800; 
+    return 800;
   };
 
   const targetLineValue = getTargetVolume();
@@ -670,10 +699,10 @@ function ChartView({ profile, logs }) {
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      d.setHours(0,0,0,0);
-      
+      d.setHours(0, 0, 0, 0);
+
       const dayLogs = logs.filter(log => {
-        const logDate = new Date(log.timestamp).setHours(0,0,0,0);
+        const logDate = new Date(log.timestamp).setHours(0, 0, 0, 0);
         return logDate === d.getTime();
       });
 
@@ -700,12 +729,12 @@ function ChartView({ profile, logs }) {
 
       <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 relative pt-10 pb-6">
         <div className="absolute top-4 left-4 flex items-center space-x-2 text-xs font-semibold text-rose-500 bg-rose-50 px-2 py-1 rounded">
-           <div className="w-3 h-0.5 bg-rose-500"></div>
-           <span>Target Normal Usia Ini: {targetLineValue}ml</span>
+          <div className="w-3 h-0.5 bg-rose-500"></div>
+          <span>Target Normal Usia Ini: {targetLineValue}ml</span>
         </div>
 
         <div className="h-64 flex items-end justify-between space-x-2 relative mt-4 border-b border-slate-200 pb-2">
-          <div 
+          <div
             className="absolute w-full border-t-2 border-dashed border-rose-400 z-0 flex items-end justify-end transition-all duration-500"
             style={{ bottom: `${(targetLineValue / yMax) * 100}%` }}
           ></div>
@@ -718,9 +747,9 @@ function ChartView({ profile, logs }) {
                 <div className="opacity-0 group-hover:opacity-100 group-active:opacity-100 absolute -top-8 bg-slate-800 text-white text-[10px] py-1 px-2 rounded pointer-events-none transition-opacity whitespace-nowrap">
                   {data.volume} ml
                 </div>
-                <div 
+                <div
                   className={`w-full max-w-[32px] rounded-t-md transition-all duration-700 ease-out ${data.volume === 0 ? 'bg-slate-100' : isMetTarget ? 'bg-teal-400' : 'bg-blue-400'}`}
-                  style={{ height: `${Math.max(heightPercentage, 1)}%` }} 
+                  style={{ height: `${Math.max(heightPercentage, 1)}%` }}
                 ></div>
                 <span className={`text-[10px] mt-2 font-medium ${data.isToday ? 'text-rose-500 font-bold' : 'text-slate-400'}`}>
                   {data.dateStr}
