@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Joyride, STATUS } from 'react-joyride';
-import { signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, setDoc, collection, onSnapshot, addDoc, deleteDoc, query } from 'firebase/firestore';
 import {
   Baby, Timer, Droplet, BarChart2, Play, Pause, Square, Save,
@@ -106,18 +106,8 @@ export default function App() {
     setIsAppAuthenticated(sessionStorage.getItem('kinaa_auth') === 'true');
   }, []);
 
-  // 1. Inisialisasi Firebase Auth (Wajib untuk koneksi aman)
+  // 1. Inisialisasi Firebase Auth
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        // Handle anonymous sign in if not using custom token flow
-        await signInAnonymously(auth);
-      } catch (error) {
-        console.error("Gagal inisialisasi auth:", error);
-      }
-    };
-    initAuth();
-
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
       setIsAuthReady(true);
@@ -306,15 +296,14 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
       return;
     }
 
-    if (!firebaseUser) return;
     setIsLoading(true);
 
     try {
       if (mode === 'register') {
-        const profileRef = doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'profile', 'main');
+        const userCredential = await createUserWithEmailAndPassword(auth, email.toLowerCase(), password);
+        const profileRef = doc(db, 'artifacts', appId, 'users', userCredential.user.uid, 'profile', 'main');
         await setDoc(profileRef, {
           email: email.toLowerCase(),
-          password,
           name: babyName,
           dob: babyDob,
           createdAt: Date.now()
@@ -322,22 +311,21 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
         showToast("Pendaftaran berhasil!");
         onAuthSuccess();
       } else {
-        if (appProfile && appProfile.email === email.toLowerCase() && appProfile.password === password) {
-          showToast("Berhasil masuk!");
-          onAuthSuccess();
-        } else {
-          setErrorMsg("Email atau Password salah!");
-        }
+        await signInWithEmailAndPassword(auth, email.toLowerCase(), password);
+        showToast("Berhasil masuk!");
+        onAuthSuccess();
       }
     } catch (error) {
       console.error(error);
-      setErrorMsg("Terjadi kesalahan sistem.");
+      if (error.code === 'auth/email-already-in-use') setErrorMsg("Email sudah terdaftar.");
+      else if (error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') setErrorMsg("Email atau Password salah!");
+      else setErrorMsg("Terjadi kesalahan sistem.");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleForgot = (e) => {
+  const handleForgot = async (e) => {
     e.preventDefault();
     setErrorMsg('');
     if (!isValidEmail(email)) {
@@ -345,11 +333,17 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
       return;
     }
     
-    if (appProfile && appProfile.email === email.toLowerCase()) {
-      showToast(`Password Anda: ${appProfile.password}`);
+    setIsLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, email.toLowerCase());
+      showToast("Email reset password telah dikirim!");
       setMode('login');
-    } else {
-      setErrorMsg("Email tidak ditemukan di perangkat ini.");
+    } catch (error) {
+      console.error(error);
+      if (error.code === 'auth/user-not-found') setErrorMsg("Email tidak terdaftar.");
+      else setErrorMsg("Gagal mengirim email reset.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -392,7 +386,7 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
               type="submit"
               className="w-full bg-rose-500 hover:bg-rose-600 text-white font-bold py-3 px-4 rounded-xl transition-all mt-6 shadow-md shadow-rose-200"
             >
-              Lihat Password
+              Kirim Email Reset
             </button>
             <div className="text-center mt-4">
               <button type="button" onClick={() => setMode('login')} className="text-sm text-slate-500 hover:text-rose-500 font-semibold transition">
