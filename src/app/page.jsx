@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Joyride, STATUS } from 'react-joyride';
-import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, confirmPasswordReset } from 'firebase/auth';
 import { doc, setDoc, collection, onSnapshot, addDoc, deleteDoc, query } from 'firebase/firestore';
 import {
   Baby, Timer, Droplet, BarChart2, Play, Pause, Square, Save,
@@ -41,6 +41,22 @@ export default function App() {
   // Tutorial State
   const [runTour, setRunTour] = useState(false);
   const [tourSteps, setTourSteps] = useState([]);
+
+  // Auth Action State
+  const [authMode, setAuthMode] = useState(null);
+  const [oobCode, setOobCode] = useState(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const mode = searchParams.get('mode');
+      const oob = searchParams.get('oobCode');
+      if (mode === 'resetPassword' && oob) {
+        setAuthMode('new_password');
+        setOobCode(oob);
+      }
+    }
+  }, []);
 
   const handleJoyrideCallback = (data) => {
     const { status } = data;
@@ -197,6 +213,8 @@ export default function App() {
           sessionStorage.setItem('kinaa_auth', 'true');
         }}
         showToast={showToast}
+        initialMode={authMode}
+        oobCode={oobCode}
       />
     );
   }
@@ -267,8 +285,14 @@ export default function App() {
 }
 
 // --- Komponen Autentikasi (Login & Register) ---
-function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
-  const [mode, setMode] = useState(appProfile ? 'login' : 'register');
+function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast, initialMode, oobCode }) {
+  const [mode, setMode] = useState(initialMode || (appProfile ? 'login' : 'register'));
+
+  useEffect(() => {
+    if (initialMode) {
+      setMode(initialMode);
+    }
+  }, [initialMode]);
 
   // Form State
   const [email, setEmail] = useState('');
@@ -280,6 +304,31 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
 
   const isValidEmail = (email) => {
     return /\S+@\S+\.\S+/.test(email);
+  };
+
+  const handleNewPassword = async (e) => {
+    e.preventDefault();
+    setErrorMsg('');
+    if (password.length < 6) {
+      setErrorMsg("Password minimal 6 karakter.");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await confirmPasswordReset(auth, oobCode, password);
+      showToast("Password berhasil diperbarui! Silakan login.");
+      setMode('login');
+      // Bersihkan URL parameters tanpa mereload halaman
+      if (typeof window !== 'undefined') {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    } catch (error) {
+      console.error(error);
+      setErrorMsg("Gagal memperbarui password. Link mungkin kedaluwarsa.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -335,7 +384,11 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
     
     setIsLoading(true);
     try {
-      await sendPasswordResetEmail(auth, email.toLowerCase());
+      const actionCodeSettings = {
+        url: `${window.location.origin}?mode=resetPassword`,
+        handleCodeInApp: false,
+      };
+      await sendPasswordResetEmail(auth, email.toLowerCase(), actionCodeSettings);
       showToast("Email reset password telah dikirim!");
       setMode('login');
     } catch (error) {
@@ -357,7 +410,7 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
         </div>
         <h2 className="text-2xl font-bold text-center text-slate-800 mb-2">KINAA APP</h2>
         <p className="text-sm text-center text-slate-500 mb-6">
-          {mode === 'login' ? 'Silakan masuk ke akun Anda' : mode === 'forgot' ? 'Pemulihan Password' : 'Buat akun untuk menyimpan data bayi Anda'}
+          {mode === 'login' ? 'Silakan masuk ke akun Anda' : mode === 'forgot' ? 'Pemulihan Password' : mode === 'new_password' ? 'Buat Password Baru Anda' : 'Buat akun untuk menyimpan data bayi Anda'}
         </p>
 
         {errorMsg && (
@@ -366,7 +419,39 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
           </div>
         )}
 
-        {mode === 'forgot' ? (
+        {mode === 'new_password' ? (
+          <form onSubmit={handleNewPassword} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Password Baru</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition"
+                  placeholder="••••••••"
+                  required
+                />
+              </div>
+            </div>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-rose-500 hover:bg-rose-600 disabled:bg-rose-300 text-white font-bold py-3 px-4 rounded-xl transition-all mt-6 shadow-md shadow-rose-200 flex justify-center items-center"
+            >
+              {isLoading ? <Loader2 className="animate-spin" size={20} /> : 'Simpan Password'}
+            </button>
+            <div className="text-center mt-4">
+              <button type="button" onClick={() => {
+                setMode('login');
+                if (typeof window !== 'undefined') window.history.replaceState({}, document.title, window.location.pathname);
+              }} className="text-sm text-slate-500 hover:text-rose-500 font-semibold transition">
+                Batal
+              </button>
+            </div>
+          </form>
+        ) : mode === 'forgot' ? (
           <form onSubmit={handleForgot} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Email Akun</label>
