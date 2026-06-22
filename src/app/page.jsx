@@ -7,7 +7,8 @@ import { signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'fi
 import { doc, setDoc, collection, onSnapshot, addDoc, deleteDoc, query } from 'firebase/firestore';
 import {
   Baby, Timer, Droplet, BarChart2, Play, Pause, Square, Save,
-  Settings, CheckCircle2, Mail, Lock, LogOut, Loader2, Bell, Plus, X, Trash2
+  Settings, CheckCircle2, Mail, Lock, LogOut, Loader2, Bell, Plus, X, Trash2,
+  ChevronLeft, ChevronRight, Calendar
 } from 'lucide-react';
 
 import { auth, db } from '@/lib/firebase';
@@ -236,7 +237,7 @@ export default function App() {
           {activeTab === 'home' && <Dashboard profile={appProfile} logs={logs} />}
           {activeTab === 'timer' && <TimerTracker onSave={(duration) => addLog('duration', duration)} />}
           {activeTab === 'volume' && <VolumeTracker onSave={(vol) => addLog('volume', vol)} />}
-          {activeTab === 'chart' && <ChartView profile={appProfile} logs={logs} />}
+          {activeTab === 'chart' && <ChartView profile={appProfile} logs={logs} appId={appId} firebaseUser={firebaseUser} showToast={showToast} />}
           {activeTab === 'reminder' && <ReminderModule appId={appId} firebaseUser={firebaseUser} onLog={(type, amount) => addLog(type, amount)} showToast={showToast} />}
         </main>
 
@@ -759,69 +760,211 @@ function VolumeTracker({ onSave }) {
   );
 }
 
-function ChartView({ profile, logs }) {
+function ChartView({ profile, logs, appId, firebaseUser, showToast }) {
+  const [viewMode, setViewMode] = useState('mingguan'); // harian, mingguan, bulanan, tahunan
+  const [currentDate, setCurrentDate] = useState(new Date());
+
   const getTargetVolume = () => {
     if (!profile?.dob) return 600;
     const birthDate = new Date(profile.dob);
     const today = new Date();
     const ageInMonths = Math.abs(today.getTime() - birthDate.getTime()) / (1000 * 60 * 60 * 24 * 30);
-
     if (ageInMonths < 1) return 600;
     if (ageInMonths < 3) return 750;
     if (ageInMonths < 6) return 900;
     return 800;
   };
 
-  const targetLineValue = getTargetVolume();
+  const dailyTarget = getTargetVolume();
 
-  const chartData = useMemo(() => {
+  const handlePrev = () => {
+    const d = new Date(currentDate);
+    if (viewMode === 'harian') d.setDate(d.getDate() - 1);
+    if (viewMode === 'mingguan') d.setDate(d.getDate() - 7);
+    if (viewMode === 'bulanan') d.setMonth(d.getMonth() - 1);
+    if (viewMode === 'tahunan') d.setFullYear(d.getFullYear() - 1);
+    setCurrentDate(d);
+  };
+
+  const handleNext = () => {
+    const d = new Date(currentDate);
+    if (viewMode === 'harian') d.setDate(d.getDate() + 1);
+    if (viewMode === 'mingguan') d.setDate(d.getDate() + 7);
+    if (viewMode === 'bulanan') d.setMonth(d.getMonth() + 1);
+    if (viewMode === 'tahunan') d.setFullYear(d.getFullYear() + 1);
+    if (d > new Date()) return;
+    setCurrentDate(d);
+  };
+
+  const isToday = (date) => {
+    const today = new Date();
+    return date.getDate() === today.getDate() && date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear();
+  };
+
+  const getVisibleLogs = useMemo(() => {
+    return logs.filter(log => {
+      const logDate = new Date(log.timestamp);
+      if (viewMode === 'harian') {
+        return logDate.toDateString() === currentDate.toDateString();
+      } else if (viewMode === 'mingguan') {
+        const start = new Date(currentDate);
+        const day = start.getDay() || 7;
+        start.setDate(start.getDate() - day + 1);
+        start.setHours(0,0,0,0);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 6);
+        end.setHours(23,59,59,999);
+        return logDate >= start && logDate <= end;
+      } else if (viewMode === 'bulanan') {
+        return logDate.getMonth() === currentDate.getMonth() && logDate.getFullYear() === currentDate.getFullYear();
+      } else if (viewMode === 'tahunan') {
+        return logDate.getFullYear() === currentDate.getFullYear();
+      }
+      return false;
+    }).sort((a, b) => b.timestamp - a.timestamp);
+  }, [logs, currentDate, viewMode]);
+
+  const { chartData, displayTarget } = useMemo(() => {
     const data = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      d.setHours(0, 0, 0, 0);
+    let target = dailyTarget;
 
-      const dayLogs = logs.filter(log => {
-        const logDate = new Date(log.timestamp).setHours(0, 0, 0, 0);
-        return logDate === d.getTime();
+    if (viewMode === 'harian') {
+      target = dailyTarget / 6;
+      for (let i = 0; i < 24; i += 4) {
+        const intervalLogs = getVisibleLogs.filter(l => {
+          const h = new Date(l.timestamp).getHours();
+          return h >= i && h < i + 4;
+        });
+        const totalVol = intervalLogs.filter(l => l.type === 'volume').reduce((a, c) => a + c.amount, 0);
+        data.push({
+          label: `${String(i).padStart(2,'0')}:00`,
+          volume: totalVol,
+          isToday: isToday(currentDate) && new Date().getHours() >= i && new Date().getHours() < i + 4
+        });
+      }
+    } else if (viewMode === 'mingguan') {
+      const start = new Date(currentDate);
+      const day = start.getDay() || 7; 
+      start.setDate(start.getDate() - day + 1);
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(start);
+        d.setDate(d.getDate() + i);
+        const dayLogs = getVisibleLogs.filter(l => new Date(l.timestamp).toDateString() === d.toDateString());
+        const totalVol = dayLogs.filter(l => l.type === 'volume').reduce((a, c) => a + c.amount, 0);
+        data.push({
+          label: d.toLocaleDateString('id-ID', { weekday: 'short' }),
+          volume: totalVol,
+          isToday: isToday(d)
+        });
+      }
+    } else if (viewMode === 'bulanan') {
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+      const lastDay = new Date(year, month + 1, 0).getDate();
+      const weeks = [
+        { label: 'W1', start: 1, end: 7 },
+        { label: 'W2', start: 8, end: 14 },
+        { label: 'W3', start: 15, end: 21 },
+        { label: 'W4', start: 22, end: lastDay }
+      ];
+      weeks.forEach(w => {
+        const weekLogs = getVisibleLogs.filter(l => {
+          const d = new Date(l.timestamp).getDate();
+          return d >= w.start && d <= w.end;
+        });
+        const totalVol = weekLogs.filter(l => l.type === 'volume').reduce((a, c) => a + c.amount, 0);
+        const daysInWeek = w.end - w.start + 1;
+        data.push({
+          label: w.label,
+          volume: Math.round(totalVol / daysInWeek),
+          isToday: isToday(new Date()) && currentDate.getMonth() === new Date().getMonth() && new Date().getDate() >= w.start && new Date().getDate() <= w.end
+        });
       });
-
-      const totalVol = dayLogs.filter(l => l.type === 'volume').reduce((acc, curr) => acc + curr.amount, 0);
-
-      data.push({
-        dateStr: d.toLocaleDateString('id-ID', { weekday: 'short' }),
-        volume: totalVol,
-        isToday: i === 0
-      });
+    } else if (viewMode === 'tahunan') {
+      const months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+      for (let i = 0; i < 12; i++) {
+        const monthLogs = getVisibleLogs.filter(l => new Date(l.timestamp).getMonth() === i);
+        const totalVol = monthLogs.filter(l => l.type === 'volume').reduce((a, c) => a + c.amount, 0);
+        const daysInMonth = new Date(currentDate.getFullYear(), i + 1, 0).getDate();
+        data.push({
+          label: months[i],
+          volume: Math.round(totalVol / daysInMonth),
+          isToday: isToday(new Date()) && new Date().getMonth() === i
+        });
+      }
     }
-    return data;
-  }, [logs]);
+    return { chartData: data, displayTarget: target };
+  }, [getVisibleLogs, currentDate, viewMode, dailyTarget]);
 
   const maxDataValue = Math.max(...chartData.map(d => d.volume));
-  const yMax = Math.max(targetLineValue + 200, maxDataValue + 100);
+  const yMax = Math.max(displayTarget + (viewMode === 'harian' ? 50 : 200), maxDataValue + (viewMode === 'harian' ? 20 : 100));
+
+  const getDateRangeLabel = () => {
+    if (viewMode === 'harian') return currentDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+    if (viewMode === 'mingguan') {
+      const start = new Date(currentDate);
+      const day = start.getDay() || 7; 
+      start.setDate(start.getDate() - day + 1);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 6);
+      return `${start.getDate()} ${start.toLocaleDateString('id-ID', {month:'short'})} - ${end.getDate()} ${end.toLocaleDateString('id-ID', {month:'short', year:'numeric'})}`;
+    }
+    if (viewMode === 'bulanan') return currentDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+    return currentDate.getFullYear().toString();
+  };
+
+  const handleDeleteLog = async (logId) => {
+    if (!firebaseUser || !appId) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'logs', logId));
+      showToast("Data berhasil dihapus");
+    } catch (err) {
+      console.error(err);
+      showToast("Gagal menghapus data");
+    }
+  };
 
   return (
-    <div className="space-y-6 pt-2">
+    <div className="space-y-6 pt-2 pb-12">
       <div className="text-center mb-6">
-        <h2 className="text-xl font-bold text-slate-800">Grafik Asupan Volume</h2>
-        <p className="text-sm text-slate-500">Bandingkan konsumsi aktual vs batas normal</p>
+        <h2 className="text-xl font-bold text-slate-800 mb-4">Grafik & Histori</h2>
+        <div className="flex justify-center space-x-2 bg-slate-100 p-1 rounded-xl mx-auto w-fit">
+          {['harian', 'mingguan', 'bulanan', 'tahunan'].map(mode => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              className={`px-3 py-1.5 text-[10px] sm:text-xs font-semibold rounded-lg capitalize transition-all ${viewMode === mode ? 'bg-white shadow text-rose-500' : 'text-slate-500 hover:bg-slate-200'}`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between bg-white px-4 py-2 rounded-2xl shadow-sm border border-slate-100">
+        <button onClick={handlePrev} className="p-2 text-slate-400 hover:text-rose-500 transition"><ChevronLeft size={20} /></button>
+        <div className="flex items-center space-x-2 text-slate-700 font-semibold text-xs sm:text-sm">
+          <Calendar size={16} className="text-rose-400" />
+          <span>{getDateRangeLabel()}</span>
+        </div>
+        <button onClick={handleNext} disabled={currentDate > new Date() || isToday(currentDate)} className={`p-2 transition ${currentDate >= new Date() && isToday(currentDate) ? 'text-slate-200 cursor-not-allowed' : 'text-slate-400 hover:text-rose-500'}`}><ChevronRight size={20} /></button>
       </div>
 
       <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 relative pt-10 pb-6">
-        <div className="absolute top-4 left-4 flex items-center space-x-2 text-xs font-semibold text-rose-500 bg-rose-50 px-2 py-1 rounded">
+        <div className="absolute top-4 left-4 flex items-center space-x-2 text-[10px] font-semibold text-rose-500 bg-rose-50 px-2 py-1 rounded">
           <div className="w-3 h-0.5 bg-rose-500"></div>
-          <span>Target Normal Usia Ini: {targetLineValue}ml</span>
+          <span>Target {viewMode === 'harian' ? 'Per 4 Jam' : 'Rata-rata Harian'}: {Math.round(displayTarget)}ml</span>
         </div>
 
-        <div className="h-64 flex items-end justify-between space-x-2 relative mt-4 border-b border-slate-200 pb-2">
+        <div className="h-64 flex items-end justify-between space-x-1 sm:space-x-2 relative mt-4 border-b border-slate-200 pb-2">
           <div
             className="absolute w-full border-t-2 border-dashed border-rose-400 z-0 flex items-end justify-end transition-all duration-500"
-            style={{ bottom: `${(targetLineValue / yMax) * 100}%` }}
+            style={{ bottom: `${(displayTarget / yMax) * 100}%` }}
           ></div>
 
           {chartData.map((data, idx) => {
             const heightPercentage = (data.volume / yMax) * 100;
-            const isMetTarget = data.volume >= targetLineValue;
+            const isMetTarget = data.volume >= displayTarget;
             return (
               <div key={idx} className="flex-1 flex flex-col items-center justify-end h-full z-10 group relative">
                 <div className="opacity-0 group-hover:opacity-100 group-active:opacity-100 absolute -top-8 bg-slate-800 text-white text-[10px] py-1 px-2 rounded pointer-events-none transition-opacity whitespace-nowrap">
@@ -831,8 +974,8 @@ function ChartView({ profile, logs }) {
                   className={`w-full max-w-[32px] rounded-t-md transition-all duration-700 ease-out ${data.volume === 0 ? 'bg-slate-100' : isMetTarget ? 'bg-teal-400' : 'bg-blue-400'}`}
                   style={{ height: `${Math.max(heightPercentage, 1)}%` }}
                 ></div>
-                <span className={`text-[10px] mt-2 font-medium ${data.isToday ? 'text-rose-500 font-bold' : 'text-slate-400'}`}>
-                  {data.dateStr}
+                <span className={`text-[9px] sm:text-[10px] mt-2 font-medium ${data.isToday ? 'text-rose-500 font-bold' : 'text-slate-400'}`}>
+                  {data.label}
                 </span>
               </div>
             );
@@ -840,13 +983,40 @@ function ChartView({ profile, logs }) {
         </div>
       </div>
 
-      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-        <h4 className="font-semibold text-slate-700 text-sm mb-2 flex items-center">
-          <Settings size={16} className="mr-2" /> Wawasan KINAA
-        </h4>
-        <p className="text-xs text-slate-500 leading-relaxed">
-          Garis putus-putus merah merepresentasikan estimasi kebutuhan cairan per hari berdasarkan umur bayi. Pastikan asupan bayi Anda mendekati atau berada di atas garis target tersebut.
-        </p>
+      <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100">
+        <h3 className="font-bold text-slate-800 mb-4 flex items-center">Histori Aktivitas</h3>
+        {getVisibleLogs.length === 0 ? (
+          <p className="text-center text-slate-400 text-sm py-4">Belum ada catatan pada periode ini.</p>
+        ) : (
+          <ul className="space-y-3 max-h-96 overflow-y-auto pr-1 custom-scrollbar">
+            {getVisibleLogs.map(log => {
+              const isVol = log.type === 'volume';
+              const timeStr = new Date(log.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+              const dateStr = new Date(log.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+              return (
+                <li key={log.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                  <div className="flex items-center space-x-3">
+                    <div className={`p-2 rounded-full ${isVol ? 'bg-blue-100 text-blue-500' : 'bg-rose-100 text-rose-500'}`}>
+                      {isVol ? <Droplet size={16} /> : <Timer size={16} />}
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700">{isVol ? 'Minum Susu' : 'Menyusui Langsung'}</p>
+                      <p className="text-[10px] text-slate-500">{dateStr} • {timeStr}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <span className={`font-bold font-mono text-sm ${isVol ? 'text-blue-600' : 'text-rose-600'}`}>
+                      {isVol ? `${log.amount}ml` : formatTime(log.amount)}
+                    </span>
+                    <button onClick={() => handleDeleteLog(log.id)} className="text-slate-300 hover:text-rose-500 transition">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
     </div>
   );
@@ -954,11 +1124,11 @@ function ReminderModule({ appId, firebaseUser, onLog, showToast }) {
   }, [reminders, permission, onLog, showToast]);
 
   return (
-    <div className="absolute inset-0 bg-slate-900 overflow-y-auto pb-24 p-4 text-white">
+    <div className="absolute inset-0 bg-slate-50 overflow-y-auto pb-24 p-4 text-slate-800">
       <div className="flex justify-between items-center mb-6 pt-2">
-        <h2 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-300 to-rose-300">Pengingat Jadwal</h2>
+        <h2 className="text-xl font-bold text-slate-800">Pengingat Jadwal</h2>
         {permission !== 'granted' && (
-          <button onClick={requestNotificationPermission} className="text-[10px] bg-rose-500 px-2 py-1 rounded shadow hover:bg-rose-600 transition font-bold">
+          <button onClick={requestNotificationPermission} className="text-[10px] bg-rose-500 text-white px-2 py-1 rounded shadow hover:bg-rose-600 transition font-bold">
             Aktifkan Notifikasi
           </button>
         )}
@@ -966,25 +1136,25 @@ function ReminderModule({ appId, firebaseUser, onLog, showToast }) {
 
       <div className="space-y-4">
         {reminders.length === 0 ? (
-          <div className="text-center text-slate-500 mt-10">
-            <Bell size={48} className="mx-auto mb-4 opacity-20" />
+          <div className="text-center text-slate-400 mt-10">
+            <Bell size={48} className="mx-auto mb-4 opacity-30" />
             <p>Belum ada jadwal. Tambahkan pengingat agar tidak terlewat!</p>
           </div>
         ) : (
           reminders.map(rem => (
-            <div key={rem.id} className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex justify-between items-center shadow-lg">
+            <div key={rem.id} className="bg-white p-4 rounded-2xl border border-slate-100 flex justify-between items-center shadow-sm">
               <div>
-                <h3 className="text-2xl font-bold font-mono tracking-tighter text-slate-100">{rem.timeStr}</h3>
-                <p className="text-xs text-purple-300 font-medium mt-1">
+                <h3 className="text-2xl font-bold font-mono tracking-tighter text-slate-700">{rem.timeStr}</h3>
+                <p className="text-xs text-rose-500 font-bold mt-1">
                   {rem.type === 'dbf' ? 'Menyusui Langsung' : `Pumping (${rem.side === 'both' ? 'Keduanya' : rem.side === 'left' ? 'Kiri' : 'Kanan'})`}
                 </p>
                 <p className="text-[10px] text-slate-500 mt-1">Setiap {rem.frequency} jam</p>
               </div>
               <div className="flex flex-col space-y-2">
-                <button onClick={() => { onLog(rem.type === 'dbf' ? 'duration' : 'volume', rem.type === 'dbf' ? 600 : 120); showToast("Selesai!"); }} className="p-2 text-teal-400 bg-teal-900/20 hover:bg-teal-900/50 rounded-xl transition text-[10px] font-bold">
+                <button onClick={() => { onLog(rem.type === 'dbf' ? 'duration' : 'volume', rem.type === 'dbf' ? 600 : 120); showToast("Selesai!"); }} className="px-3 py-2 text-teal-600 bg-teal-50 hover:bg-teal-100 rounded-xl transition text-[10px] font-bold">
                   Selesai
                 </button>
-                <button onClick={() => deleteReminder(rem.id)} className="p-2 text-rose-400 bg-rose-900/20 hover:bg-rose-900/50 rounded-xl transition flex justify-center">
+                <button onClick={() => deleteReminder(rem.id)} className="p-2 text-rose-500 bg-rose-50 hover:bg-rose-100 rounded-xl transition flex justify-center">
                   <Trash2 size={16} />
                 </button>
               </div>
@@ -995,37 +1165,37 @@ function ReminderModule({ appId, firebaseUser, onLog, showToast }) {
 
       <button 
         onClick={() => setIsModalOpen(true)}
-        className="fixed bottom-20 right-6 bg-gradient-to-tr from-purple-500 to-rose-500 w-14 h-14 rounded-full flex items-center justify-center shadow-lg shadow-purple-500/30 hover:scale-105 transition-transform z-30"
+        className="fixed bottom-20 right-6 bg-rose-500 text-white w-14 h-14 rounded-full flex items-center justify-center shadow-lg shadow-rose-500/30 hover:scale-105 transition-transform z-30"
       >
         <Plus size={28} />
       </button>
 
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex flex-col justify-end">
-          <div className="bg-slate-900 rounded-t-3xl p-6 border-t border-slate-700 animate-in slide-in-from-bottom duration-300">
+        <div className="fixed inset-0 bg-slate-900/40 z-50 flex flex-col justify-end">
+          <div className="bg-white rounded-t-3xl p-6 border-t border-slate-100 animate-in slide-in-from-bottom duration-300 shadow-2xl">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="font-bold text-lg text-slate-100">Tambah Pengingat</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-white"><X size={24} /></button>
+              <h3 className="font-bold text-lg text-slate-800">Tambah Pengingat</h3>
+              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={24} /></button>
             </div>
 
             <form onSubmit={handleSave} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Tipe Aktivitas</label>
+                <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">Tipe Aktivitas</label>
                 <div className="flex space-x-2">
-                  <button type="button" onClick={() => setType('dbf')} className={`flex-1 py-3 rounded-xl font-semibold transition ${type === 'dbf' ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-800 text-slate-400'}`}>Menyusui</button>
-                  <button type="button" onClick={() => setType('pumping')} className={`flex-1 py-3 rounded-xl font-semibold transition ${type === 'pumping' ? 'bg-rose-600 text-white shadow-md' : 'bg-slate-800 text-slate-400'}`}>Pumping</button>
+                  <button type="button" onClick={() => setType('dbf')} className={`flex-1 py-3 rounded-xl font-semibold transition ${type === 'dbf' ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Menyusui</button>
+                  <button type="button" onClick={() => setType('pumping')} className={`flex-1 py-3 rounded-xl font-semibold transition ${type === 'pumping' ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>Pumping</button>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Waktu Mulai</label>
-                <input type="time" required value={timeStr} onChange={e => setTimeStr(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-purple-500 transition font-mono text-lg" />
+                <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">Waktu Mulai</label>
+                <input type="time" required value={timeStr} onChange={e => setTimeStr(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 transition font-mono text-lg" />
               </div>
 
               {type === 'pumping' && (
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Sisi Payudara</label>
-                  <select value={side} onChange={e => setSide(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-rose-500 transition">
+                  <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">Sisi Payudara</label>
+                  <select value={side} onChange={e => setSide(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 transition">
                     <option value="both">Keduanya</option>
                     <option value="left">Kiri</option>
                     <option value="right">Kanan</option>
@@ -1034,8 +1204,8 @@ function ReminderModule({ appId, firebaseUser, onLog, showToast }) {
               )}
 
               <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Ulangi Setiap</label>
-                <select value={frequency} onChange={e => setFrequency(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-purple-500 transition">
+                <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">Ulangi Setiap</label>
+                <select value={frequency} onChange={e => setFrequency(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 transition">
                   <option value="1">1 Jam</option>
                   <option value="2">2 Jam</option>
                   <option value="3">3 Jam</option>
@@ -1045,7 +1215,7 @@ function ReminderModule({ appId, firebaseUser, onLog, showToast }) {
                 </select>
               </div>
 
-              <button type="submit" className="w-full bg-gradient-to-r from-purple-500 to-rose-500 hover:from-purple-600 hover:to-rose-600 text-white font-bold py-4 rounded-xl mt-6 shadow-lg shadow-purple-500/20 transition-all active:scale-95">Simpan Jadwal</button>
+              <button type="submit" className="w-full bg-rose-500 hover:bg-rose-600 text-white font-bold py-4 rounded-xl mt-6 shadow-lg shadow-rose-500/20 transition-all active:scale-95">Simpan Jadwal</button>
             </form>
           </div>
         </div>
