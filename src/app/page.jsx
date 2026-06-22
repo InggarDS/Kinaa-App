@@ -2,6 +2,7 @@
 // @ts-nocheck
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Joyride, STATUS } from 'react-joyride';
 import { signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { doc, setDoc, collection, onSnapshot, addDoc } from 'firebase/firestore';
 import {
@@ -35,6 +36,51 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [toast, setToast] = useState(null);
   const [isLoadingData, setIsLoadingData] = useState(true);
+
+  // Tutorial State
+  const [runTour, setRunTour] = useState(false);
+  const tourSteps = [
+    {
+      target: 'body',
+      content: 'Selamat datang di Kinaa App! Aplikasi ini dibuat untuk membantu Anda memantau nutrisi bayi Anda. Mari kita mulai tur singkat.',
+      placement: 'center',
+      disableBeacon: true,
+    },
+    {
+      target: '.tour-home',
+      content: 'Ini adalah halaman Beranda. Di sini Anda bisa melihat ringkasan aktivitas hari ini.',
+    },
+    {
+      target: '.tour-timer',
+      content: 'Gunakan tab Durasi untuk mencatat waktu menyusui.',
+    },
+    {
+      target: '.tour-volume',
+      content: 'Catat volume susu yang diminum bayi Anda di sini.',
+    },
+    {
+      target: '.tour-chart',
+      content: 'Lihat ringkasan 7 hari terakhir di tab Grafik.',
+    }
+  ];
+
+  const handleJoyrideCallback = (data) => {
+    const { status } = data;
+    const finishedStatuses = [STATUS.FINISHED, STATUS.SKIPPED];
+    if (finishedStatuses.includes(status)) {
+      setRunTour(false);
+      localStorage.setItem('kinaa_has_seen_tutorial', 'true');
+    }
+  };
+
+  useEffect(() => {
+    if (isAppAuthenticated && !isLoadingData) {
+      const hasSeen = localStorage.getItem('kinaa_has_seen_tutorial');
+      if (!hasSeen) {
+        setRunTour(true);
+      }
+    }
+  }, [isAppAuthenticated, isLoadingData]);
 
   // Initialize auth state from sessionStorage after mount (to avoid hydration mismatch)
   useEffect(() => {
@@ -184,11 +230,25 @@ export default function App() {
         )}
 
         {/* Bottom Navigation */}
+        <Joyride
+          steps={tourSteps}
+          run={runTour}
+          continuous={true}
+          showProgress={true}
+          showSkipButton={true}
+          callback={handleJoyrideCallback}
+          styles={{
+            options: {
+              primaryColor: '#f43f5e',
+              zIndex: 1000,
+            }
+          }}
+        />
         <nav className="fixed sm:absolute bottom-0 w-full max-w-md bg-white border-t border-slate-200 flex justify-around p-2 pb-safe shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-20">
-          <NavButton icon={Baby} label="Home" isActive={activeTab === 'home'} onClick={() => setActiveTab('home')} />
-          <NavButton icon={Timer} label="Durasi" isActive={activeTab === 'timer'} onClick={() => setActiveTab('timer')} />
-          <NavButton icon={Droplet} label="Volume" isActive={activeTab === 'volume'} onClick={() => setActiveTab('volume')} />
-          <NavButton icon={BarChart2} label="Grafik" isActive={activeTab === 'chart'} onClick={() => setActiveTab('chart')} />
+          <NavButton tourClass="tour-home" icon={Baby} label="Home" isActive={activeTab === 'home'} onClick={() => { setActiveTab('home'); setRunTour(false); }} />
+          <NavButton tourClass="tour-timer" icon={Timer} label="Durasi" isActive={activeTab === 'timer'} onClick={() => { setActiveTab('timer'); setRunTour(false); }} />
+          <NavButton tourClass="tour-volume" icon={Droplet} label="Volume" isActive={activeTab === 'volume'} onClick={() => { setActiveTab('volume'); setRunTour(false); }} />
+          <NavButton tourClass="tour-chart" icon={BarChart2} label="Grafik" isActive={activeTab === 'chart'} onClick={() => { setActiveTab('chart'); setRunTour(false); }} />
         </nav>
       </div>
     </div>
@@ -338,11 +398,11 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
 
 // --- Komponen Pendukung ---
 
-function NavButton({ icon: Icon, label, isActive, onClick }) {
+function NavButton({ icon: Icon, label, isActive, onClick, tourClass }) {
   return (
     <button
       onClick={onClick}
-      className={`flex flex-col items-center p-2 rounded-xl w-16 transition-all ${isActive ? 'text-rose-500 bg-rose-50' : 'text-slate-400 hover:text-slate-600'}`}
+      className={`flex flex-col items-center p-2 rounded-xl w-16 transition-all ${isActive ? 'text-rose-500 bg-rose-50' : 'text-slate-400 hover:text-slate-600'} ${tourClass || ''}`}
     >
       <Icon size={24} className={isActive ? 'fill-rose-100' : ''} />
       <span className="text-[10px] mt-1 font-medium">{label}</span>
