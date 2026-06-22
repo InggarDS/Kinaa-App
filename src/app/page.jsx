@@ -214,7 +214,12 @@ export default function App() {
       <AuthScreen
         firebaseUser={firebaseUser}
         appProfile={appProfile}
-        onAuthSuccess={() => {
+        onAuthSuccess={(isNewUser) => {
+          if (!isNewUser) {
+            localStorage.setItem('kinaa_has_seen_tutorial', 'true');
+            localStorage.setItem('kinaa_has_seen_reminder_tour', 'true');
+            setRunTour(false);
+          }
           setIsAppAuthenticated(true);
           sessionStorage.setItem('kinaa_auth', 'true');
         }}
@@ -364,11 +369,11 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast, initia
           createdAt: Date.now()
         });
         showToast("Pendaftaran berhasil!");
-        onAuthSuccess();
+        onAuthSuccess(true);
       } else {
         await signInWithEmailAndPassword(auth, email.toLowerCase(), password);
         showToast("Berhasil masuk!");
-        onAuthSuccess();
+        onAuthSuccess(false);
       }
     } catch (error) {
       console.error(error);
