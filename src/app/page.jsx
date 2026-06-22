@@ -13,7 +13,8 @@ import {
 
 import { auth, db } from '@/lib/firebase';
 
-const appId = process.env.NEXT_PUBLIC_FIREBASE_APP_ID || 'default-app-id';
+// Restore the old ID used in the database so previous data isn't lost
+const appId = "G-B68MLE16SG";
 
 // --- Helper Functions ---
 const formatTime = (seconds) => {
