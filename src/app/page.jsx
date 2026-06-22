@@ -286,9 +286,26 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
   const [babyName, setBabyName] = useState('');
   const [babyDob, setBabyDob] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const isValidEmail = (email) => {
+    return /\S+@\S+\.\S+/.test(email);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setErrorMsg('');
+    
+    if (!isValidEmail(email)) {
+      setErrorMsg("Format email tidak valid.");
+      return;
+    }
+
+    if (mode === 'register' && password.length < 6) {
+      setErrorMsg("Password minimal 6 karakter.");
+      return;
+    }
+
     if (!firebaseUser) return;
     setIsLoading(true);
 
@@ -309,14 +326,30 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
           showToast("Berhasil masuk!");
           onAuthSuccess();
         } else {
-          showToast("Email atau Password salah!");
+          setErrorMsg("Email atau Password salah!");
         }
       }
     } catch (error) {
       console.error(error);
-      showToast("Terjadi kesalahan sistem.");
+      setErrorMsg("Terjadi kesalahan sistem.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleForgot = (e) => {
+    e.preventDefault();
+    setErrorMsg('');
+    if (!isValidEmail(email)) {
+      setErrorMsg("Format email tidak valid.");
+      return;
+    }
+    
+    if (appProfile && appProfile.email === email.toLowerCase()) {
+      showToast(`Password Anda: ${appProfile.password}`);
+      setMode('login');
+    } else {
+      setErrorMsg("Email tidak ditemukan di perangkat ini.");
     }
   };
 
@@ -329,89 +362,139 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast }) {
           </div>
         </div>
         <h2 className="text-2xl font-bold text-center text-slate-800 mb-2">KINAA APP</h2>
-        <p className="text-sm text-center text-slate-500 mb-8">
-          {mode === 'login' ? 'Silakan masuk ke akun Anda' : 'Buat akun untuk menyimpan data bayi Anda'}
+        <p className="text-sm text-center text-slate-500 mb-6">
+          {mode === 'login' ? 'Silakan masuk ke akun Anda' : mode === 'forgot' ? 'Pemulihan Password' : 'Buat akun untuk menyimpan data bayi Anda'}
         </p>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Email</label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition"
-                placeholder="email@contoh.com"
-                required
-              />
-            </div>
+        {errorMsg && (
+          <div className="bg-rose-50 text-rose-600 text-xs p-3 rounded-xl mb-4 border border-rose-100 flex items-center">
+            <X size={14} className="mr-2" /> {errorMsg}
           </div>
+        )}
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Password</label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition"
-                placeholder="••••••••"
-                required
-              />
-            </div>
-          </div>
-
-          {mode === 'register' && (
-            <div className="pt-2 space-y-4 border-t border-slate-100 mt-2">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Nama Bayi</label>
+        {mode === 'forgot' ? (
+          <form onSubmit={handleForgot} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Email Akun</label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
                 <input
                   type="text"
-                  value={babyName}
-                  onChange={(e) => setBabyName(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition"
-                  placeholder="Contoh: Kinaa"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Tanggal Lahir</label>
-                <input
-                  type="date"
-                  value={babyDob}
-                  max={new Date().toISOString().split("T")[0]}
-                  onChange={(e) => setBabyDob(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition"
+                  placeholder="email@contoh.com"
                   required
                 />
               </div>
             </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full bg-rose-500 hover:bg-rose-600 disabled:bg-rose-300 text-white font-bold py-3 px-4 rounded-xl transition-all mt-6 shadow-md shadow-rose-200 flex justify-center items-center"
-          >
-            {isLoading ? <Loader2 className="animate-spin" size={20} /> : (mode === 'login' ? 'Masuk' : 'Daftar & Mulai')}
-          </button>
-        </form>
-
-        <div className="mt-6 text-center">
-          <p className="text-sm text-slate-500">
-            {mode === 'login' ? 'Belum punya akun?' : 'Sudah punya akun?'}
             <button
-              type="button"
-              onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-              className="ml-1 text-rose-500 font-semibold hover:underline"
+              type="submit"
+              className="w-full bg-rose-500 hover:bg-rose-600 text-white font-bold py-3 px-4 rounded-xl transition-all mt-6 shadow-md shadow-rose-200"
             >
-              {mode === 'login' ? 'Daftar di sini' : 'Masuk'}
+              Lihat Password
             </button>
-          </p>
-        </div>
+            <div className="text-center mt-4">
+              <button type="button" onClick={() => setMode('login')} className="text-sm text-slate-500 hover:text-rose-500 font-semibold transition">
+                Kembali ke Login
+              </button>
+            </div>
+          </form>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Email</label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
+                <input
+                  type="text"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition"
+                  placeholder="email@contoh.com"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition"
+                  placeholder="••••••••"
+                  required
+                />
+              </div>
+            </div>
+
+            {mode === 'register' && (
+              <div className="pt-2 space-y-4 border-t border-slate-100 mt-2">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Nama Bayi</label>
+                  <input
+                    type="text"
+                    value={babyName}
+                    onChange={(e) => setBabyName(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition"
+                    placeholder="Contoh: Kinaa"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1 ml-1 uppercase tracking-wider">Tanggal Lahir</label>
+                  <input
+                    type="date"
+                    value={babyDob}
+                    max={new Date().toISOString().split("T")[0]}
+                    onChange={(e) => setBabyDob(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition"
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
+            {mode === 'login' && (
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() => { setMode('forgot'); setErrorMsg(''); }}
+                  className="text-xs font-semibold text-rose-500 hover:text-rose-600 transition"
+                >
+                  Lupa Password?
+                </button>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-rose-500 hover:bg-rose-600 disabled:bg-rose-300 text-white font-bold py-3 px-4 rounded-xl transition-all mt-6 shadow-md shadow-rose-200 flex justify-center items-center"
+            >
+              {isLoading ? <Loader2 className="animate-spin" size={20} /> : (mode === 'login' ? 'Masuk' : 'Daftar & Mulai')}
+            </button>
+          </form>
+        )}
+
+        {mode !== 'forgot' && (
+          <div className="mt-6 text-center">
+            <p className="text-sm text-slate-500">
+              {mode === 'login' ? 'Belum punya akun?' : 'Sudah punya akun?'}
+              <button
+                type="button"
+                onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setErrorMsg(''); }}
+                className="ml-1 text-rose-500 font-semibold hover:underline"
+              >
+                {mode === 'login' ? 'Daftar di sini' : 'Masuk'}
+              </button>
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
