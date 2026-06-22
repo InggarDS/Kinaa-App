@@ -1552,9 +1552,24 @@ function ReminderModule({ appId, firebaseUser, onLog, showToast }) {
   }, [appId, firebaseUser]);
 
   const requestNotificationPermission = async () => {
-    if ('Notification' in window && permission !== 'granted') {
+    if ('Notification' in window) {
       const p = await Notification.requestPermission();
       setPermission(p);
+
+      if (p === 'granted') {
+        try {
+          const { requestFCMToken } = await import('@/lib/firebase');
+          const token = await requestFCMToken();
+          if (token && firebaseUser) {
+            // Save the FCM token to the user document
+            const userRef = doc(db, 'artifacts', appId, 'users', firebaseUser.uid);
+            await setDoc(userRef, { fcmToken: token }, { merge: true });
+            console.log("FCM Token saved to user profile.");
+          }
+        } catch (error) {
+          console.error("Error setting up FCM:", error);
+        }
+      }
     }
   };
 
