@@ -4,10 +4,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Joyride, STATUS } from 'react-joyride';
 import { signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, collection, onSnapshot, addDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, onSnapshot, addDoc, deleteDoc, query } from 'firebase/firestore';
 import {
   Baby, Timer, Droplet, BarChart2, Play, Pause, Square, Save,
-  Settings, CheckCircle2, Mail, Lock, LogOut, Loader2
+  Settings, CheckCircle2, Mail, Lock, LogOut, Loader2, Bell, Plus, X, Trash2
 } from 'lucide-react';
 
 import { auth, db } from '@/lib/firebase';
@@ -39,30 +39,7 @@ export default function App() {
 
   // Tutorial State
   const [runTour, setRunTour] = useState(false);
-  const tourSteps = [
-    {
-      target: 'body',
-      content: 'Selamat datang di Kinaa App! Aplikasi ini dibuat untuk membantu Anda memantau nutrisi bayi Anda. Mari kita mulai tur singkat.',
-      placement: 'center',
-      disableBeacon: true,
-    },
-    {
-      target: '.tour-home',
-      content: 'Ini adalah halaman Beranda. Di sini Anda bisa melihat ringkasan aktivitas hari ini.',
-    },
-    {
-      target: '.tour-timer',
-      content: 'Gunakan tab Durasi untuk mencatat waktu menyusui.',
-    },
-    {
-      target: '.tour-volume',
-      content: 'Catat volume susu yang diminum bayi Anda di sini.',
-    },
-    {
-      target: '.tour-chart',
-      content: 'Lihat ringkasan 7 hari terakhir di tab Grafik.',
-    }
-  ];
+  const [tourSteps, setTourSteps] = useState([]);
 
   const handleJoyrideCallback = (data) => {
     const { status } = data;
@@ -70,13 +47,54 @@ export default function App() {
     if (finishedStatuses.includes(status)) {
       setRunTour(false);
       localStorage.setItem('kinaa_has_seen_tutorial', 'true');
+      localStorage.setItem('kinaa_has_seen_reminder_tour', 'true');
     }
   };
 
   useEffect(() => {
     if (isAppAuthenticated && !isLoadingData) {
-      const hasSeen = localStorage.getItem('kinaa_has_seen_tutorial');
-      if (!hasSeen) {
+      const hasSeenMain = localStorage.getItem('kinaa_has_seen_tutorial');
+      const hasSeenReminder = localStorage.getItem('kinaa_has_seen_reminder_tour');
+      
+      if (!hasSeenMain) {
+        setTourSteps([
+          {
+            target: 'body',
+            content: 'Selamat datang di Kinaa App! Aplikasi ini dibuat untuk membantu Anda memantau nutrisi bayi Anda. Mari kita mulai tur singkat.',
+            placement: 'center',
+            disableBeacon: true,
+          },
+          {
+            target: '.tour-reminder',
+            content: '✨ FITUR BARU! ✨ Kini Anda bisa mengatur Pengingat (Reminder) untuk jadwal menyusui atau pumping agar tidak terlewat!',
+          },
+          {
+            target: '.tour-home',
+            content: 'Ini adalah halaman Beranda. Di sini Anda bisa melihat ringkasan aktivitas hari ini.',
+          },
+          {
+            target: '.tour-timer',
+            content: 'Gunakan tab Durasi untuk mencatat waktu menyusui.',
+          },
+          {
+            target: '.tour-volume',
+            content: 'Catat volume susu yang diminum bayi Anda di sini.',
+          },
+          {
+            target: '.tour-chart',
+            content: 'Lihat ringkasan 7 hari terakhir di tab Grafik.',
+          }
+        ]);
+        setRunTour(true);
+      } else if (!hasSeenReminder) {
+        setTourSteps([
+          {
+            target: '.tour-reminder',
+            content: '✨ FITUR BARU! ✨ Kini Anda bisa mengatur Pengingat (Reminder) untuk jadwal menyusui atau pumping agar tidak terlewat!',
+            disableBeacon: true,
+            placement: 'top',
+          }
+        ]);
         setRunTour(true);
       }
     }
@@ -219,6 +237,7 @@ export default function App() {
           {activeTab === 'timer' && <TimerTracker onSave={(duration) => addLog('duration', duration)} />}
           {activeTab === 'volume' && <VolumeTracker onSave={(vol) => addLog('volume', vol)} />}
           {activeTab === 'chart' && <ChartView profile={appProfile} logs={logs} />}
+          {activeTab === 'reminder' && <ReminderModule appId={appId} firebaseUser={firebaseUser} onLog={(type, amount) => addLog(type, amount)} showToast={showToast} />}
         </main>
 
         {/* Toast Notification */}
@@ -249,6 +268,7 @@ export default function App() {
           <NavButton tourClass="tour-timer" icon={Timer} label="Durasi" isActive={activeTab === 'timer'} onClick={() => { setActiveTab('timer'); setRunTour(false); }} />
           <NavButton tourClass="tour-volume" icon={Droplet} label="Volume" isActive={activeTab === 'volume'} onClick={() => { setActiveTab('volume'); setRunTour(false); }} />
           <NavButton tourClass="tour-chart" icon={BarChart2} label="Grafik" isActive={activeTab === 'chart'} onClick={() => { setActiveTab('chart'); setRunTour(false); }} />
+          <NavButton tourClass="tour-reminder" icon={Bell} label="Pengingat" isActive={activeTab === 'reminder'} onClick={() => { setActiveTab('reminder'); setRunTour(false); }} />
         </nav>
       </div>
     </div>
@@ -828,6 +848,208 @@ function ChartView({ profile, logs }) {
           Garis putus-putus merah merepresentasikan estimasi kebutuhan cairan per hari berdasarkan umur bayi. Pastikan asupan bayi Anda mendekati atau berada di atas garis target tersebut.
         </p>
       </div>
+    </div>
+  );
+}
+
+// --- Komponen Reminder ---
+function ReminderModule({ appId, firebaseUser, onLog, showToast }) {
+  const [reminders, setReminders] = useState([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [permission, setPermission] = useState('default');
+
+  // Form states
+  const [type, setType] = useState('dbf');
+  const [timeStr, setTimeStr] = useState('08:00');
+  const [side, setSide] = useState('both');
+  const [frequency, setFrequency] = useState('2');
+
+  useEffect(() => {
+    if ('Notification' in window) {
+      setPermission(Notification.permission);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseUser) return;
+    const remRef = collection(db, 'artifacts', appId, 'users', firebaseUser.uid, 'reminders');
+    const unsub = onSnapshot(remRef, (snap) => {
+      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setReminders(data);
+    });
+    return () => unsub();
+  }, [appId, firebaseUser]);
+
+  const requestNotificationPermission = async () => {
+    if ('Notification' in window && permission !== 'granted') {
+      const p = await Notification.requestPermission();
+      setPermission(p);
+    }
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    requestNotificationPermission();
+    
+    try {
+      const remRef = collection(db, 'artifacts', appId, 'users', firebaseUser.uid, 'reminders');
+      await addDoc(remRef, {
+        type,
+        timeStr,
+        side: type === 'pumping' ? side : null,
+        frequency: parseInt(frequency),
+        isActive: true,
+        createdAt: Date.now()
+      });
+      setIsModalOpen(false);
+      showToast("Pengingat berhasil disimpan!");
+    } catch (error) {
+      console.error(error);
+      showToast("Gagal menyimpan pengingat.");
+    }
+  };
+
+  const deleteReminder = async (id) => {
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'reminders', id));
+      showToast("Pengingat dihapus");
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Notification Checker
+  useEffect(() => {
+    if (permission !== 'granted') return;
+    
+    const checkAlarms = () => {
+      const now = new Date();
+      const currentHours = String(now.getHours()).padStart(2, '0');
+      const currentMins = String(now.getMinutes()).padStart(2, '0');
+      const currentTimeStr = `${currentHours}:${currentMins}`;
+      
+      reminders.forEach(rem => {
+        if (rem.isActive && rem.timeStr === currentTimeStr && now.getSeconds() < 10) {
+          const title = rem.type === 'dbf' ? 'Waktunya Menyusui!' : 'Waktunya Pumping!';
+          const body = rem.type === 'pumping' ? `Jangan lupa pumping (Sisi: ${rem.side === 'both' ? 'Keduanya' : rem.side === 'left' ? 'Kiri' : 'Kanan'}).` : 'Ayo susui si kecil!';
+          
+          const notification = new Notification(title, {
+            body,
+            icon: '/favicon.ico',
+            requireInteraction: true
+          });
+          
+          notification.onclick = () => {
+            onLog(rem.type === 'dbf' ? 'duration' : 'volume', rem.type === 'dbf' ? 600 : 120);
+            notification.close();
+            window.focus();
+            showToast("Berhasil dicatat dari pengingat!");
+          };
+        }
+      });
+    };
+
+    const interval = setInterval(checkAlarms, 10000);
+    return () => clearInterval(interval);
+  }, [reminders, permission, onLog, showToast]);
+
+  return (
+    <div className="absolute inset-0 bg-slate-900 overflow-y-auto pb-24 p-4 text-white">
+      <div className="flex justify-between items-center mb-6 pt-2">
+        <h2 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-300 to-rose-300">Pengingat Jadwal</h2>
+        {permission !== 'granted' && (
+          <button onClick={requestNotificationPermission} className="text-[10px] bg-rose-500 px-2 py-1 rounded shadow hover:bg-rose-600 transition font-bold">
+            Aktifkan Notifikasi
+          </button>
+        )}
+      </div>
+
+      <div className="space-y-4">
+        {reminders.length === 0 ? (
+          <div className="text-center text-slate-500 mt-10">
+            <Bell size={48} className="mx-auto mb-4 opacity-20" />
+            <p>Belum ada jadwal. Tambahkan pengingat agar tidak terlewat!</p>
+          </div>
+        ) : (
+          reminders.map(rem => (
+            <div key={rem.id} className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex justify-between items-center shadow-lg">
+              <div>
+                <h3 className="text-2xl font-bold font-mono tracking-tighter text-slate-100">{rem.timeStr}</h3>
+                <p className="text-xs text-purple-300 font-medium mt-1">
+                  {rem.type === 'dbf' ? 'Menyusui Langsung' : `Pumping (${rem.side === 'both' ? 'Keduanya' : rem.side === 'left' ? 'Kiri' : 'Kanan'})`}
+                </p>
+                <p className="text-[10px] text-slate-500 mt-1">Setiap {rem.frequency} jam</p>
+              </div>
+              <div className="flex flex-col space-y-2">
+                <button onClick={() => { onLog(rem.type === 'dbf' ? 'duration' : 'volume', rem.type === 'dbf' ? 600 : 120); showToast("Selesai!"); }} className="p-2 text-teal-400 bg-teal-900/20 hover:bg-teal-900/50 rounded-xl transition text-[10px] font-bold">
+                  Selesai
+                </button>
+                <button onClick={() => deleteReminder(rem.id)} className="p-2 text-rose-400 bg-rose-900/20 hover:bg-rose-900/50 rounded-xl transition flex justify-center">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <button 
+        onClick={() => setIsModalOpen(true)}
+        className="fixed bottom-20 right-6 bg-gradient-to-tr from-purple-500 to-rose-500 w-14 h-14 rounded-full flex items-center justify-center shadow-lg shadow-purple-500/30 hover:scale-105 transition-transform z-30"
+      >
+        <Plus size={28} />
+      </button>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex flex-col justify-end">
+          <div className="bg-slate-900 rounded-t-3xl p-6 border-t border-slate-700 animate-in slide-in-from-bottom duration-300">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="font-bold text-lg text-slate-100">Tambah Pengingat</h3>
+              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-white"><X size={24} /></button>
+            </div>
+
+            <form onSubmit={handleSave} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Tipe Aktivitas</label>
+                <div className="flex space-x-2">
+                  <button type="button" onClick={() => setType('dbf')} className={`flex-1 py-3 rounded-xl font-semibold transition ${type === 'dbf' ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-800 text-slate-400'}`}>Menyusui</button>
+                  <button type="button" onClick={() => setType('pumping')} className={`flex-1 py-3 rounded-xl font-semibold transition ${type === 'pumping' ? 'bg-rose-600 text-white shadow-md' : 'bg-slate-800 text-slate-400'}`}>Pumping</button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Waktu Mulai</label>
+                <input type="time" required value={timeStr} onChange={e => setTimeStr(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-purple-500 transition font-mono text-lg" />
+              </div>
+
+              {type === 'pumping' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Sisi Payudara</label>
+                  <select value={side} onChange={e => setSide(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-rose-500 transition">
+                    <option value="both">Keduanya</option>
+                    <option value="left">Kiri</option>
+                    <option value="right">Kanan</option>
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Ulangi Setiap</label>
+                <select value={frequency} onChange={e => setFrequency(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-purple-500 transition">
+                  <option value="1">1 Jam</option>
+                  <option value="2">2 Jam</option>
+                  <option value="3">3 Jam</option>
+                  <option value="4">4 Jam</option>
+                  <option value="6">6 Jam</option>
+                  <option value="24">Sekali sehari</option>
+                </select>
+              </div>
+
+              <button type="submit" className="w-full bg-gradient-to-r from-purple-500 to-rose-500 hover:from-purple-600 hover:to-rose-600 text-white font-bold py-4 rounded-xl mt-6 shadow-lg shadow-purple-500/20 transition-all active:scale-95">Simpan Jadwal</button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
