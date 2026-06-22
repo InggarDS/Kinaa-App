@@ -133,7 +133,10 @@ export default function App() {
 
   // 2. Listener Firestore untuk Profil & Logs
   useEffect(() => {
-    if (!firebaseUser) return;
+    if (!firebaseUser) {
+      setIsLoadingData(false);
+      return;
+    }
 
     // Listener Profil
     const profileRef = doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'profile', 'main');
@@ -144,7 +147,10 @@ export default function App() {
         setAppProfile(null);
       }
       setIsLoadingData(false);
-    }, (error) => console.error("Error fetching profile:", error));
+    }, (error) => {
+      console.error("Error fetching profile:", error);
+      setIsLoadingData(false);
+    });
 
     // Listener Logs (hanya jika sudah login aplikasi)
     let unsubLogs = () => { };
