@@ -1219,28 +1219,12 @@ function VolumeTracker({ onSave, logs = [], profile, onDeleteLog, firebaseUser, 
 function ChartView({ profile, logs, appId, firebaseUser, showToast, onDeleteLog }) {
   const [chartType, setChartType] = useState('baby'); // 'baby' or 'pumping'
   const [viewMode, setViewMode] = useState('mingguan'); // harian, mingguan, bulanan, tahunan
+  const [dailyInterval, setDailyInterval] = useState(4); // 1, 2, or 4 hours
   const [currentDate, setCurrentDate] = useState(new Date());
+  
   const [isEditingTarget, setIsEditingTarget] = useState(false);
-  const [newTarget, setNewTarget] = useState('');
-
-  useEffect(() => {
-    if (profile?.pumpingTarget) setNewTarget(String(profile.pumpingTarget));
-    else setNewTarget('750');
-  }, [profile]);
-
-  const handleSaveTarget = async () => {
-    const val = parseInt(newTarget);
-    if (val > 0 && firebaseUser && appId) {
-      try {
-        const profileRef = doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'profile', 'main');
-        await setDoc(profileRef, { pumpingTarget: val }, { merge: true });
-        setIsEditingTarget(false);
-        showToast("Target perah ASI diperbarui!");
-      } catch (err) {
-        showToast("Gagal memperbarui target.");
-      }
-    }
-  };
+  const [newTargetBaby, setNewTargetBaby] = useState('');
+  const [newTargetPumping, setNewTargetPumping] = useState('');
 
   const getTargetVolume = () => {
     if (!profile?.dob) return 600;
@@ -1251,6 +1235,26 @@ function ChartView({ profile, logs, appId, firebaseUser, showToast, onDeleteLog 
     if (ageInMonths < 3) return 750;
     if (ageInMonths < 6) return 900;
     return 800;
+  };
+
+  useEffect(() => {
+    setNewTargetPumping(profile?.pumpingTarget ? String(profile.pumpingTarget) : '750');
+    setNewTargetBaby(profile?.babyTarget ? String(profile.babyTarget) : String(getTargetVolume()));
+  }, [profile]);
+
+  const handleSaveTarget = async () => {
+    const val = chartType === 'baby' ? parseInt(newTargetBaby) : parseInt(newTargetPumping);
+    if (val > 0 && firebaseUser && appId) {
+      try {
+        const profileRef = doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'profile', 'main');
+        const updateData = chartType === 'baby' ? { babyTarget: val } : { pumpingTarget: val };
+        await setDoc(profileRef, updateData, { merge: true });
+        setIsEditingTarget(false);
+        showToast("Target diperbarui!");
+      } catch (err) {
+        showToast("Gagal memperbarui target.");
+      }
+    }
   };
 
   const dailyTarget = getTargetVolume();
@@ -1307,22 +1311,50 @@ function ChartView({ profile, logs, appId, firebaseUser, showToast, onDeleteLog 
 
   const { chartData, displayTarget } = useMemo(() => {
     const data = [];
-    let target = chartType === 'baby' ? dailyTarget : (profile?.pumpingTarget || 750);
+    let target = chartType === 'baby' ? (profile?.babyTarget || dailyTarget) : (profile?.pumpingTarget || 750);
 
     if (viewMode === 'harian') {
-      target = chartType === 'baby' ? (dailyTarget / 6) : (target / 6);
-      for (let i = 0; i < 24; i += 4) {
-        const intervalLogs = getVisibleLogs.filter(l => {
-          const h = new Date(l.timestamp).getHours();
-          return h >= i && h < i + 4;
-        });
-        const totalVol = intervalLogs.filter(l => chartType === 'baby' ? l.type === 'volume' : l.type === 'pumping').reduce((a, c) => a + (chartType === 'baby' ? c.amount : (c.total || 0)), 0);
-        data.push({
-          label: `${String(i).padStart(2,'0')}:00`,
-          volume: totalVol,
-          isToday: isToday(currentDate) && new Date().getHours() >= i && new Date().getHours() < i + 4
-        });
-      }
+      const startOfDay = new Date(currentDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      
+      // For exact plotting, we need logs sorted chronologically (ascending)
+      const exactLogs = [...getVisibleLogs].reverse();
+      
+      exactLogs.forEach((log, index) => {
+        const d = new Date(log.timestamp);
+        const hours = d.getHours();
+        const minutes = d.getMinutes();
+        const xPercentage = ((d.getTime() - startOfDay.getTime()) / (24 * 60 * 60 * 1000)) * 100;
+        
+        let gapStr = '';
+        if (index > 0) {
+          const prevD = new Date(exactLogs[index - 1].timestamp);
+          const diffMs = d.getTime() - prevD.getTime();
+          const diffMins = Math.round(diffMs / 60000);
+          const h = Math.floor(diffMins / 60);
+          const m = diffMins % 60;
+          gapStr = h > 0 ? `${h}j ${m}m` : `${m}m`;
+        }
+
+        const vol = chartType === 'baby' ? log.amount : (log.total || 0);
+
+        if (vol > 0) {
+          data.push({
+            id: log.id,
+            label: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
+            volume: vol,
+            xPercentage: xPercentage,
+            isToday: isToday(currentDate) && new Date().getHours() === hours,
+            gapStr: gapStr,
+            duration: log.duration || 0,
+            notes: log.notes || ''
+          });
+        }
+      });
+      
+      // If there are no logs today, we can just return an empty array or push a single dummy 0 point?
+      // An empty array is fine, the line chart will just be blank.
+
     } else if (viewMode === 'mingguan') {
       const start = new Date(currentDate);
       const day = start.getDay() || 7; 
@@ -1375,10 +1407,11 @@ function ChartView({ profile, logs, appId, firebaseUser, showToast, onDeleteLog 
       }
     }
     return { chartData: data, displayTarget: target };
-  }, [getVisibleLogs, currentDate, viewMode, dailyTarget, chartType, profile]);
+  }, [getVisibleLogs, currentDate, viewMode, dailyTarget, chartType, profile, dailyInterval]);
 
-  const maxDataValue = Math.max(...chartData.map(d => d.volume));
-  const yMax = Math.max(displayTarget + (viewMode === 'harian' ? 50 : 200), maxDataValue + (viewMode === 'harian' ? 20 : 100));
+  const maxDataValue = chartData.length > 0 ? Math.max(...chartData.map(d => d.volume)) : 0;
+  const visualTarget = viewMode === 'harian' ? displayTarget / 6 : displayTarget;
+  const yMax = Math.max(visualTarget + (viewMode === 'harian' ? 50 : 200), maxDataValue + (viewMode === 'harian' ? 20 : 100));
 
   const getDateRangeLabel = () => {
     if (viewMode === 'harian') return currentDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -1437,46 +1470,133 @@ function ChartView({ profile, logs, appId, firebaseUser, showToast, onDeleteLog 
         <button onClick={handleNext} disabled={currentDate > new Date() || isToday(currentDate)} className={`p-2 transition ${currentDate >= new Date() && isToday(currentDate) ? 'text-slate-200 cursor-not-allowed' : 'text-slate-400 hover:text-rose-500'}`}><ChevronRight size={20} /></button>
       </div>
 
-      <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 relative pt-10 pb-6">
-        <div className="absolute top-4 left-4 flex items-center space-x-2 text-[10px] font-semibold text-rose-500 bg-rose-50 px-2 py-1 rounded z-20">
-          <div className="w-3 h-0.5 bg-rose-500"></div>
-          <span>Target {viewMode === 'harian' ? 'Per 4 Jam' : 'Rata-rata Harian'}: {Math.round(displayTarget)}ml</span>
-          {chartType === 'pumping' && (
-            <button onClick={() => setIsEditingTarget(!isEditingTarget)} className="ml-1 text-rose-700 hover:underline">Ubah</button>
+      <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 relative pt-20 pb-8 overflow-hidden">
+        <div className="absolute top-4 left-4 flex flex-col space-y-2 z-30">
+          <div className="flex items-center space-x-2 text-[10px] font-semibold text-slate-700 bg-white/80 backdrop-blur-sm px-2 py-1 rounded-lg border border-slate-200 shadow-sm w-fit">
+            <div className={`w-3 h-0.5 ${chartType === 'baby' ? 'bg-blue-500' : 'bg-rose-500'}`}></div>
+            <span>Target {viewMode === 'harian' ? 'Per Sesi' : 'Rata-rata Harian'}: {Math.round(viewMode === 'harian' ? displayTarget / 6 : displayTarget)}ml</span>
+            <button onClick={() => setIsEditingTarget(!isEditingTarget)} className={`ml-1 hover:underline ${chartType === 'baby' ? 'text-blue-600' : 'text-rose-600'}`}>Ubah</button>
+          </div>
+          
+          {isEditingTarget && (
+            <div className="flex items-center space-x-2 bg-white p-2 rounded-xl border border-slate-200 shadow-md w-fit">
+              <input type="number" min="0" value={chartType === 'baby' ? newTargetBaby : newTargetPumping} onChange={(e) => chartType === 'baby' ? setNewTargetBaby(e.target.value) : setNewTargetPumping(e.target.value)} className="w-16 text-xs bg-slate-50 focus:outline-none px-2 py-1 rounded border border-slate-200 font-bold" />
+              <span className="text-[10px] font-bold text-slate-400">ml/hari</span>
+              <button onClick={handleSaveTarget} className={`text-white text-[10px] font-bold px-2 py-1 rounded transition-colors ${chartType === 'baby' ? 'bg-blue-500 hover:bg-blue-600' : 'bg-rose-500 hover:bg-rose-600'}`}>Simpan</button>
+            </div>
           )}
         </div>
-        {isEditingTarget && chartType === 'pumping' && (
-          <div className="absolute top-12 left-4 flex items-center space-x-2 bg-white p-2 rounded-xl border border-rose-200 shadow-md z-30">
-            <input type="number" min="0" value={newTarget} onChange={(e)=>setNewTarget(e.target.value)} className="w-16 text-xs bg-slate-50 focus:outline-none px-2 py-1 rounded border border-slate-200 font-bold" />
-            <span className="text-[10px] font-bold text-slate-400">ml/hari</span>
-            <button onClick={handleSaveTarget} className="bg-rose-500 text-white text-[10px] font-bold px-2 py-1 rounded hover:bg-rose-600">Simpan</button>
-          </div>
-        )}
 
-        <div className="h-64 flex items-end justify-between space-x-1 sm:space-x-2 relative mt-4 border-b border-slate-200 pb-2">
-          <div
-            className="absolute w-full border-t-2 border-dashed border-rose-400 z-0 flex items-end justify-end transition-all duration-500"
-            style={{ bottom: `${(displayTarget / yMax) * 100}%` }}
-          ></div>
+        <div className="h-64 relative mt-10 border-b border-slate-200 pb-6 w-full">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-[calc(100%-1.5rem)] overflow-visible">
+            <defs>
+              {/* Baby: Cyan to Indigo */}
+              <linearGradient id="gradientBaby" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.5" />
+                <stop offset="100%" stopColor="#4f46e5" stopOpacity="0.0" />
+              </linearGradient>
+              
+              {/* Pumping: Rose to Purple */}
+              <linearGradient id="gradientPumping" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.5" />
+                <stop offset="100%" stopColor="#9333ea" stopOpacity="0.0" />
+              </linearGradient>
+              
+              <linearGradient id="lineGradientBaby" x1="0" x2="0" y1="0" y2="1">
+                {/* Over Target: Mint to Emerald */}
+                <stop offset="0%" stopColor="#34d399" />
+                <stop offset={`${Math.max(0, 100 - (visualTarget / yMax) * 100)}%`} stopColor="#059669" />
+                {/* Under Target: Sky Blue to Indigo */}
+                <stop offset={`${Math.max(0, 100 - (visualTarget / yMax) * 100)}%`} stopColor="#0ea5e9" />
+                <stop offset="100%" stopColor="#4f46e5" />
+              </linearGradient>
+              
+              <linearGradient id="lineGradientPumping" x1="0" x2="0" y1="0" y2="1">
+                {/* Over Target: Yellow to Gold */}
+                <stop offset="0%" stopColor="#fde047" />
+                <stop offset={`${Math.max(0, 100 - (visualTarget / yMax) * 100)}%`} stopColor="#f59e0b" />
+                {/* Under Target: Rose to Purple */}
+                <stop offset={`${Math.max(0, 100 - (visualTarget / yMax) * 100)}%`} stopColor="#f43f5e" />
+                <stop offset="100%" stopColor="#9333ea" />
+              </linearGradient>
+            </defs>
 
-          {chartData.map((data, idx) => {
-            const heightPercentage = (data.volume / yMax) * 100;
-            const isMetTarget = data.volume >= displayTarget;
-            return (
-              <div key={idx} className="flex-1 flex flex-col items-center justify-end h-full z-10 group relative">
-                <div className="opacity-0 group-hover:opacity-100 group-active:opacity-100 absolute -top-8 bg-slate-800 text-white text-[10px] py-1 px-2 rounded pointer-events-none transition-opacity whitespace-nowrap">
-                  {data.volume} ml
+            {/* Target Line */}
+            <line 
+              x1="0" 
+              y1={Math.max(0, 100 - (visualTarget / yMax) * 100)} 
+              x2="100" 
+              y2={Math.max(0, 100 - (visualTarget / yMax) * 100)} 
+              stroke={chartType === 'baby' ? '#93c5fd' : '#fda4af'} 
+              strokeWidth="1" 
+              strokeDasharray="2 2" 
+              vectorEffect="non-scaling-stroke" 
+            />
+
+            {/* Area Fill */}
+            <polygon 
+              points={`0,100 ${chartData.map((d, i) => `${viewMode === 'harian' ? d.xPercentage : (chartData.length > 1 ? (i / (chartData.length - 1)) * 100 : 50)},${Math.max(0, 100 - (d.volume / yMax) * 100)}`).join(' ')} 100,100`}
+              fill={chartType === 'baby' ? 'url(#gradientBaby)' : 'url(#gradientPumping)'} 
+            />
+            
+            {/* Data Line */}
+            <polyline 
+              points={chartData.map((d, i) => `${viewMode === 'harian' ? d.xPercentage : (chartData.length > 1 ? (i / (chartData.length - 1)) * 100 : 50)},${Math.max(0, 100 - (d.volume / yMax) * 100)}`).join(' ')} 
+              fill="none" 
+              stroke={chartType === 'baby' ? 'url(#lineGradientBaby)' : 'url(#lineGradientPumping)'} 
+              strokeWidth="2.5" 
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+
+          {/* Dots and Labels */}
+          <div className="absolute inset-0 w-full h-[calc(100%-1.5rem)] pointer-events-none">
+            {chartData.map((data, idx) => {
+              const left = viewMode === 'harian' ? data.xPercentage : (chartData.length > 1 ? (idx / (chartData.length - 1)) * 100 : 50);
+              const bottom = (data.volume / yMax) * 100;
+              const isOverTarget = data.volume >= visualTarget;
+              
+              // Hide some labels on mobile if dailyInterval is 1 (24 items) to prevent overlap
+              const hideLabel = viewMode === 'harian' && dailyInterval === 1 && idx % 3 !== 0;
+
+              const overColorText = chartType === 'baby' ? 'text-emerald-500' : 'text-amber-500';
+              const overColorBorder = chartType === 'baby' ? 'border-emerald-500' : 'border-amber-500';
+              const underColorBorder = chartType === 'baby' ? 'border-indigo-400' : 'border-purple-400';
+
+              return (
+                <div key={idx} className="absolute flex flex-col items-center justify-end z-10 group" style={{ left: `${left}%`, bottom: 0, transform: 'translateX(-50%)', height: '100%' }}>
+                  
+                  {/* Detailed Tooltip on Hover */}
+                  <div className="opacity-0 group-hover:opacity-100 absolute bg-slate-800 text-white text-[10px] p-2 rounded-xl shadow-xl pointer-events-none transition-all duration-200 w-max z-50 flex flex-col items-center translate-y-2 group-hover:-translate-y-1" style={{ bottom: `calc(${Math.max(0, bottom)}% + 12px)` }}>
+                    <span className={`font-bold text-xs ${isOverTarget ? overColorText : ''}`}>{data.volume} ml</span>
+                    <span className="text-slate-300 mb-1">{data.label}</span>
+                    {viewMode === 'harian' && data.gapStr && (
+                      <span className="text-rose-300 mt-1 font-semibold">Jarak: {data.gapStr}</span>
+                    )}
+                    {viewMode === 'harian' && data.duration > 0 && (
+                      <span className="text-blue-300 font-semibold">Durasi: {data.duration} mnt</span>
+                    )}
+                    {/* Tiny arrow pointing down */}
+                    <div className="absolute -bottom-1 w-2 h-2 bg-slate-800 rotate-45"></div>
+                  </div>
+
+                  {/* Pinned Value above Dot */}
+                  <div className={`absolute text-[8px] font-bold bg-white/90 px-1 rounded border transition-all duration-300 pointer-events-auto shadow-sm group-hover:opacity-0 ${isOverTarget ? (chartType === 'baby' ? 'text-emerald-600 border-emerald-200' : 'text-amber-600 border-amber-200') : 'text-slate-700 border-slate-200'}`} style={{ bottom: `calc(${Math.max(0, bottom)}% + 8px)` }}>
+                    {data.volume}
+                  </div>
+                  
+                  {/* Dot */}
+                  <div className={`absolute w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-white border-2 pointer-events-auto transition-transform group-hover:scale-150 cursor-pointer shadow-sm ${isOverTarget ? overColorBorder : underColorBorder}`} style={{ bottom: `calc(${Math.max(0, bottom)}% - 4px)` }}></div>
+                  
+                  {/* X Axis Label */}
+                  <span className={`absolute -bottom-6 text-[8px] sm:text-[9px] whitespace-nowrap ${data.isToday ? (isOverTarget ? overColorText + ' font-bold' : 'text-rose-500 font-bold') : 'text-slate-400'} ${hideLabel ? 'hidden sm:block' : ''}`}>
+                    {data.label}
+                  </span>
                 </div>
-                <div
-                  className={`w-full max-w-[32px] rounded-t-md transition-all duration-700 ease-out ${data.volume === 0 ? 'bg-slate-100' : isMetTarget ? 'bg-teal-400' : 'bg-blue-400'}`}
-                  style={{ height: `${Math.max(heightPercentage, 1)}%` }}
-                ></div>
-                <span className={`text-[9px] sm:text-[10px] mt-2 font-medium ${data.isToday ? 'text-rose-500 font-bold' : 'text-slate-400'}`}>
-                  {data.label}
-                </span>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 
