@@ -398,9 +398,9 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast, initia
       showToast("Email reset password telah dikirim!");
       setMode('login');
     } catch (error) {
-      console.error(error);
+      console.error("Reset Password Error:", error);
       if (error.code === 'auth/user-not-found') setErrorMsg("Email tidak terdaftar.");
-      else setErrorMsg("Gagal mengirim email reset.");
+      else setErrorMsg(`Gagal: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
