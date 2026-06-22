@@ -175,20 +175,28 @@ export default function App() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const addLog = async (type, amount) => {
+  const addLog = async (type, data) => {
     if (!firebaseUser) return;
     try {
       const logsRef = collection(db, 'artifacts', appId, 'users', firebaseUser.uid, 'logs');
-      await addDoc(logsRef, {
-        type,
-        amount,
-        timestamp: Date.now()
-      });
-      showToast(`Data ${type === 'volume' ? 'volume' : 'durasi'} berhasil disimpan!`);
+      const logEntry = typeof data === 'object' ? { type, ...data, timestamp: Date.now() } : { type, amount: data, timestamp: Date.now() };
+      await addDoc(logsRef, logEntry);
+      showToast(`Data ${type === 'pumping' ? 'perah ASI' : type === 'volume' ? 'volume' : 'durasi'} berhasil disimpan!`);
       setActiveTab('home');
     } catch (error) {
       console.error("Gagal menyimpan log:", error);
       showToast("Gagal menyimpan data.");
+    }
+  };
+
+  const deleteLog = async (logId) => {
+    if (!firebaseUser) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'logs', logId));
+      showToast("Data berhasil dihapus");
+    } catch (error) {
+      console.error(error);
+      showToast("Gagal menghapus data");
     }
   };
 
@@ -214,7 +222,12 @@ export default function App() {
       <AuthScreen
         firebaseUser={firebaseUser}
         appProfile={appProfile}
-        onAuthSuccess={() => {
+        onAuthSuccess={(isNewUser) => {
+          if (!isNewUser) {
+            localStorage.setItem('kinaa_has_seen_tutorial', 'true');
+            localStorage.setItem('kinaa_has_seen_reminder_tour', 'true');
+            setRunTour(false);
+          }
           setIsAppAuthenticated(true);
           sessionStorage.setItem('kinaa_auth', 'true');
         }}
@@ -246,12 +259,11 @@ export default function App() {
           </button>
         </header>
 
-        {/* Konten Utama */}
         <main className="flex-1 overflow-y-auto p-4 custom-scrollbar">
           {activeTab === 'home' && <Dashboard profile={appProfile} logs={logs} />}
           {activeTab === 'timer' && <TimerTracker onSave={(duration) => addLog('duration', duration)} />}
-          {activeTab === 'volume' && <VolumeTracker onSave={(vol) => addLog('volume', vol)} />}
-          {activeTab === 'chart' && <ChartView profile={appProfile} logs={logs} appId={appId} firebaseUser={firebaseUser} showToast={showToast} />}
+          {activeTab === 'volume' && <VolumeTracker onSave={(data) => addLog(data.type || 'volume', data)} logs={logs} profile={appProfile} onDeleteLog={deleteLog} firebaseUser={firebaseUser} appId={appId} showToast={showToast} />}
+          {activeTab === 'chart' && <ChartView profile={appProfile} logs={logs} appId={appId} firebaseUser={firebaseUser} showToast={showToast} onDeleteLog={deleteLog} />}
           {activeTab === 'reminder' && <ReminderModule appId={appId} firebaseUser={firebaseUser} onLog={(type, amount) => addLog(type, amount)} showToast={showToast} />}
         </main>
 
@@ -364,11 +376,11 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast, initia
           createdAt: Date.now()
         });
         showToast("Pendaftaran berhasil!");
-        onAuthSuccess();
+        onAuthSuccess(true);
       } else {
         await signInWithEmailAndPassword(auth, email.toLowerCase(), password);
         showToast("Berhasil masuk!");
-        onAuthSuccess();
+        onAuthSuccess(false);
       }
     } catch (error) {
       console.error(error);
@@ -398,9 +410,9 @@ function AuthScreen({ firebaseUser, appProfile, onAuthSuccess, showToast, initia
       showToast("Email reset password telah dikirim!");
       setMode('login');
     } catch (error) {
-      console.error(error);
+      console.error("Reset Password Error:", error);
       if (error.code === 'auth/user-not-found') setErrorMsg("Email tidak terdaftar.");
-      else setErrorMsg("Gagal mengirim email reset.");
+      else setErrorMsg(`Gagal: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -624,7 +636,9 @@ function Dashboard({ profile, logs }) {
   }, [logs]);
 
   const totalVolumeToday = todayLogs.filter(l => l.type === 'volume').reduce((acc, curr) => acc + curr.amount, 0);
+  const totalBabyDurationToday = todayLogs.filter(l => l.type === 'volume').reduce((acc, curr) => acc + (curr.duration || 0), 0);
   const totalDurationToday = todayLogs.filter(l => l.type === 'duration').reduce((acc, curr) => acc + curr.amount, 0);
+  const totalPumpingToday = todayLogs.filter(l => l.type === 'pumping').reduce((acc, curr) => acc + (curr.total || 0), 0);
 
   return (
     <div className="space-y-6 pb-6">
@@ -642,16 +656,22 @@ function Dashboard({ profile, logs }) {
 
       <div>
         <h4 className="font-bold text-slate-800 mb-3 text-lg">Ringkasan Hari Ini</h4>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex flex-col items-center justify-center text-center">
-            <Droplet className="text-blue-500 mb-2" size={28} />
-            <span className="text-2xl font-black text-blue-900">{totalVolumeToday}</span>
-            <span className="text-xs font-semibold text-blue-600 uppercase tracking-wider">ml ASI/Susu</span>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-blue-50 border border-blue-100 p-3 rounded-2xl flex flex-col items-center justify-center text-center">
+            <Droplet className="text-blue-500 mb-1" size={24} />
+            <span className="text-lg sm:text-xl font-black text-blue-900">{totalVolumeToday}</span>
+            <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">Susu Bayi</span>
+            {totalBabyDurationToday > 0 && <span className="text-[9px] font-bold text-blue-400 mt-1">{totalBabyDurationToday} mnt</span>}
           </div>
-          <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex flex-col items-center justify-center text-center">
-            <Timer className="text-amber-500 mb-2" size={28} />
-            <span className="text-xl font-black text-amber-900">{formatTime(totalDurationToday)}</span>
-            <span className="text-xs font-semibold text-amber-600 uppercase tracking-wider">Menyusui</span>
+          <div className="bg-amber-50 border border-amber-100 p-3 rounded-2xl flex flex-col items-center justify-center text-center">
+            <Timer className="text-amber-500 mb-1" size={24} />
+            <span className="text-sm sm:text-lg font-black text-amber-900">{formatTime(totalDurationToday)}</span>
+            <span className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">Menyusui</span>
+          </div>
+          <div className="bg-rose-50 border border-rose-100 p-3 rounded-2xl flex flex-col items-center justify-center text-center">
+            <Droplet className="text-rose-500 mb-1" size={24} />
+            <span className="text-lg sm:text-xl font-black text-rose-900">{totalPumpingToday}</span>
+            <span className="text-[10px] font-semibold text-rose-600 uppercase tracking-wider">Perah ASI</span>
           </div>
         </div>
       </div>
@@ -665,26 +685,33 @@ function Dashboard({ profile, logs }) {
           </div>
         ) : (
           <div className="space-y-3">
-            {logs.slice().reverse().slice(0, 5).map(log => (
-              <div key={log.id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl shadow-sm">
-                <div className="flex items-center space-x-3">
-                  <div className={`p-2 rounded-lg ${log.type === 'volume' ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'}`}>
-                    {log.type === 'volume' ? <Droplet size={18} /> : <Timer size={18} />}
+            {logs.slice().reverse().slice(0, 5).map(log => {
+              const isVol = log.type === 'volume';
+              const isPump = log.type === 'pumping';
+              
+              return (
+                <div key={log.id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl shadow-sm">
+                  <div className="flex items-center space-x-3">
+                    <div className={`p-2 rounded-lg shrink-0 ${isVol ? 'bg-blue-100 text-blue-600' : isPump ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'}`}>
+                      {isVol || isPump ? <Droplet size={18} /> : <Timer size={18} />}
+                    </div>
+                    <div className="flex flex-col overflow-hidden">
+                      <p className="font-semibold text-slate-800 text-sm truncate">
+                        {isVol ? 'Minum Susu/ASI' : isPump ? 'Perah ASI' : 'Menyusui Langsung'}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {log.duration > 0 && ` • Durasi: ${log.duration} mnt`}
+                      </p>
+                      {log.notes && <p className="text-[10px] text-slate-400 italic truncate mt-0.5 max-w-[150px]">"{log.notes}"</p>}
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-semibold text-slate-800 text-sm">
-                      {log.type === 'volume' ? 'Minum Susu/ASI' : 'Menyusui Langsung'}
-                    </p>
-                    <p className="text-xs text-slate-400">
-                      {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </p>
+                  <div className="font-bold text-slate-700 text-sm shrink-0 pl-2">
+                    {isVol ? `${log.amount} ml` : isPump ? `${log.total} ml` : formatTime(log.amount)}
                   </div>
                 </div>
-                <div className="font-bold text-slate-700">
-                  {log.type === 'volume' ? `${log.amount} ml` : formatTime(log.amount)}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -866,14 +893,122 @@ function TimerTracker({ onSave }) {
   );
 }
 
-function VolumeTracker({ onSave }) {
+function VolumeTracker({ onSave, logs = [], profile, onDeleteLog, firebaseUser, appId, showToast }) {
+  const [trackerType, setTrackerType] = useState('baby'); // 'baby' or 'pumping'
+  
+  // Baby intake state
   const [volume, setVolume] = useState('');
+  const [babyNotes, setBabyNotes] = useState('');
+  const [babyDuration, setBabyDuration] = useState('');
 
-  const handleSave = () => {
+  // Baby stopwatch state
+  const [babyTimerMode, setBabyTimerMode] = useState('manual');
+  const [babyTimeSecs, setBabyTimeSecs] = useState(0);
+  const [isBabyRunning, setIsBabyRunning] = useState(false);
+  const babyTimerRef = useRef(null);
+  const babyStartTimeRef = useRef(null);
+  const babyAccumRef = useRef(0);
+
+  const toggleBabyTimer = () => {
+    if (isBabyRunning) {
+      setIsBabyRunning(false);
+      clearInterval(babyTimerRef.current);
+      const elapsed = Math.floor((Date.now() - babyStartTimeRef.current) / 1000);
+      babyAccumRef.current += elapsed;
+      setBabyTimeSecs(babyAccumRef.current);
+    } else {
+      setIsBabyRunning(true);
+      babyStartTimeRef.current = Date.now();
+      babyTimerRef.current = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - babyStartTimeRef.current) / 1000);
+        setBabyTimeSecs(babyAccumRef.current + elapsed);
+      }, 1000);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (babyTimerRef.current) clearInterval(babyTimerRef.current);
+    };
+  }, []);
+
+  const formatBabyTime = (totalSecs) => {
+    const m = String(Math.floor(totalSecs / 60)).padStart(2, '0');
+    const s = String(totalSecs % 60).padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  // Pumping state
+  const [leftVol, setLeftVol] = useState('');
+  const [rightVol, setRightVol] = useState('');
+  const [duration, setDuration] = useState('');
+  const [notes, setNotes] = useState('');
+  const [isEditingTarget, setIsEditingTarget] = useState(false);
+  const [newTarget, setNewTarget] = useState('');
+
+  useEffect(() => {
+    if (profile?.pumpingTarget) setNewTarget(String(profile.pumpingTarget));
+    else setNewTarget('750');
+  }, [profile]);
+
+  const handleSaveTarget = async () => {
+    const val = parseInt(newTarget);
+    if (val > 0 && firebaseUser && appId) {
+      try {
+        const profileRef = doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'profile', 'main');
+        await setDoc(profileRef, { pumpingTarget: val }, { merge: true });
+        setIsEditingTarget(false);
+        showToast("Target perah ASI diperbarui!");
+      } catch (err) {
+        showToast("Gagal memperbarui target.");
+      }
+    }
+  };
+
+  const handleSaveBaby = () => {
     const val = parseInt(volume);
+    
+    let finalSecs = babyAccumRef.current;
+    if (isBabyRunning) {
+      clearInterval(babyTimerRef.current);
+      const elapsed = Math.floor((Date.now() - babyStartTimeRef.current) / 1000);
+      finalSecs += elapsed;
+      setIsBabyRunning(false);
+    }
+    
+    const dur = babyTimerMode === 'stopwatch' 
+      ? Math.round(finalSecs / 60) 
+      : parseInt(babyDuration) || 0;
+
     if (val > 0) {
-      onSave(val);
+      onSave({ type: 'volume', amount: val, duration: dur, notes: babyNotes });
       setVolume('');
+      setBabyNotes('');
+      setBabyDuration('');
+      
+      setBabyTimeSecs(0);
+      babyAccumRef.current = 0;
+    }
+  };
+
+  const handleSavePumping = () => {
+    const l = parseInt(leftVol) || 0;
+    const r = parseInt(rightVol) || 0;
+    const dur = parseInt(duration) || 0;
+    
+    if (l > 0 || r > 0) {
+      onSave({
+        type: 'pumping',
+        left: l,
+        right: r,
+        total: l + r,
+        duration: dur,
+        notes: notes
+      });
+      setLeftVol('');
+      setRightVol('');
+      setDuration('');
+      setNotes('');
     }
   };
 
@@ -882,55 +1017,229 @@ function VolumeTracker({ onSave }) {
     setVolume(String(current + amt));
   };
 
+  const pumpingLogs = useMemo(() => {
+    return logs.filter(l => l.type === 'pumping').sort((a, b) => b.timestamp - a.timestamp);
+  }, [logs]);
+
   return (
-    <div className="flex flex-col h-full space-y-6 pt-4">
-      <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100 flex flex-col items-center justify-center shadow-sm">
-        <div className="bg-white p-4 rounded-full shadow-sm text-blue-500 mb-4">
-          <Droplet size={32} />
-        </div>
-        <h3 className="text-center font-bold text-blue-900 mb-4">Volume ASI / Susu</h3>
-
-        <div className="flex items-center space-x-2 bg-white rounded-2xl px-6 py-4 shadow-inner w-full max-w-xs">
-          <input
-            type="number" min="0"
-            value={volume}
-            onChange={(e) => setVolume(e.target.value)}
-            className="flex-1 text-center text-5xl font-black text-slate-800 focus:outline-none bg-transparent w-full"
-            placeholder="0"
-          />
-          <span className="text-xl font-bold text-slate-400">ml</span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-3 mt-4">
-        {[10, 30, 50, 90, 120, 150].map((amt) => (
-          <button
-            key={amt}
-            onClick={() => addAmount(amt)}
-            className="bg-white border border-slate-200 py-3 rounded-xl text-slate-600 font-semibold shadow-sm hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors flex flex-col items-center"
-          >
-            <span className="text-xs text-slate-400 mb-1">+ Tambah</span>
-            <span className="text-lg">{amt} ml</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="flex-1 flex items-end mt-6">
+    <div className="flex flex-col h-full space-y-4 pt-2">
+      {/* Tab Switcher */}
+      <div className="bg-slate-200 p-1 rounded-xl flex shrink-0">
         <button
-          onClick={handleSave}
-          disabled={!volume || parseInt(volume) <= 0}
-          className="w-full bg-blue-500 disabled:bg-slate-300 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-200 transition-colors flex items-center justify-center"
+          onClick={() => setTrackerType('baby')}
+          className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${trackerType === 'baby' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
         >
-          <Save className="mr-2" size={20} /> Simpan Data Volume
+          Susu Bayi
+        </button>
+        <button
+          onClick={() => setTrackerType('pumping')}
+          className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${trackerType === 'pumping' ? 'bg-white text-rose-500 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Perah ASI
         </button>
       </div>
+
+      {trackerType === 'baby' ? (
+        <>
+          <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100 flex flex-col items-center justify-center shadow-sm mt-2 shrink-0">
+            <div className="bg-white p-4 rounded-full shadow-sm text-blue-500 mb-4">
+              <Droplet size={32} />
+            </div>
+            <h3 className="text-center font-bold text-blue-900 mb-4">Volume ASI / Susu Bayi</h3>
+
+            <div className="flex items-center space-x-2 bg-white rounded-2xl px-6 py-4 shadow-inner w-full max-w-xs">
+              <input
+                type="number" min="0"
+                value={volume}
+                onChange={(e) => setVolume(e.target.value)}
+                className="flex-1 text-center text-5xl font-black text-slate-800 focus:outline-none bg-transparent w-full"
+                placeholder="0"
+              />
+              <span className="text-xl font-bold text-slate-400">ml</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 mt-4 shrink-0">
+            {[10, 30, 50, 90, 120, 150].map((amt) => (
+              <button
+                key={amt}
+                onClick={() => addAmount(amt)}
+                className="bg-white border border-slate-200 py-3 rounded-xl text-slate-600 font-semibold shadow-sm hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors flex flex-col items-center"
+              >
+                <span className="text-xs text-slate-400 mb-1">+ Tambah</span>
+                <span className="text-lg">{amt} ml</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4 shrink-0 mt-4">
+            <h3 className="font-bold text-slate-700 mb-2">Detail Opsional</h3>
+            <div className="flex space-x-4">
+              <div className="flex-1 flex flex-col">
+                <div className="flex justify-between items-center mb-2">
+                  <label className="text-xs font-semibold text-slate-500">DURASI (MENIT)</label>
+                  <button onClick={() => setBabyTimerMode(babyTimerMode === 'manual' ? 'stopwatch' : 'manual')} className="text-[9px] text-blue-500 font-bold uppercase tracking-wider hover:underline">
+                    {babyTimerMode === 'manual' ? 'Stopwatch' : 'Manual'}
+                  </button>
+                </div>
+                {babyTimerMode === 'manual' ? (
+                  <div className="relative flex-1 flex items-center">
+                    <Timer className="absolute left-3 text-slate-400" size={16} />
+                    <input
+                      type="number" min="0"
+                      value={babyDuration}
+                      onChange={(e) => setBabyDuration(e.target.value)}
+                      className="w-full pl-9 pr-2 py-2 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition text-sm h-[38px]"
+                      placeholder="0"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-2 bg-slate-50 rounded-xl border border-slate-200 p-1 transition flex-1 h-[38px]">
+                    <div className="flex-1 text-center font-mono font-bold text-slate-700 tracking-wider text-sm">
+                      {formatBabyTime(babyTimeSecs)}
+                    </div>
+                    <button onClick={toggleBabyTimer} className={`w-7 h-7 rounded-lg flex items-center justify-center text-white shadow-sm transition-colors ${isBabyRunning ? 'bg-amber-500 hover:bg-amber-600' : 'bg-teal-500 hover:bg-teal-600'}`}>
+                      {isBabyRunning ? <Pause size={14} fill="currentColor"/> : <Play size={14} className="ml-0.5" fill="currentColor"/>}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs font-semibold text-slate-500 mb-2">CATATAN</label>
+                <input
+                  type="text"
+                  value={babyNotes}
+                  onChange={(e) => setBabyNotes(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white transition text-sm"
+                  placeholder="Susu formula..."
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 flex-1 pb-16 sm:pb-0">
+            <button
+              onClick={handleSaveBaby}
+              disabled={!parseInt(volume) || parseInt(volume) <= 0}
+              className="w-full bg-blue-500 hover:bg-blue-600 disabled:bg-slate-300 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-200 transition-colors flex items-center justify-center"
+            >
+              <Save className="mr-2" size={20} /> Simpan Data Volume
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="flex-1 flex flex-col space-y-4 overflow-y-auto custom-scrollbar pb-4 mt-2">
+          <div className="bg-rose-50 p-5 rounded-3xl border border-rose-100 flex flex-col shadow-sm shrink-0">
+            <h3 className="text-center font-bold text-rose-900 mb-4">Volume ASI Perah</h3>
+            
+            <div className="flex space-x-4 mb-4">
+              <div className="flex-1 flex flex-col items-center">
+                <label className="text-xs font-semibold text-rose-700 mb-2">PAYUDARA KIRI</label>
+                <div className="bg-white rounded-xl px-4 py-3 shadow-inner w-full flex items-center border border-rose-50">
+                  <input
+                    type="number" min="0"
+                    value={leftVol}
+                    onChange={(e) => setLeftVol(e.target.value)}
+                    className="flex-1 text-center text-3xl font-black text-slate-800 focus:outline-none w-full"
+                    placeholder="0"
+                  />
+                  <span className="text-sm font-bold text-slate-400 ml-1">ml</span>
+                </div>
+              </div>
+              
+              <div className="flex-1 flex flex-col items-center">
+                <label className="text-xs font-semibold text-rose-700 mb-2">PAYUDARA KANAN</label>
+                <div className="bg-white rounded-xl px-4 py-3 shadow-inner w-full flex items-center border border-rose-50">
+                  <input
+                    type="number" min="0"
+                    value={rightVol}
+                    onChange={(e) => setRightVol(e.target.value)}
+                    className="flex-1 text-center text-3xl font-black text-slate-800 focus:outline-none w-full"
+                    placeholder="0"
+                  />
+                  <span className="text-sm font-bold text-slate-400 ml-1">ml</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-3 shadow-sm flex justify-between items-center border border-rose-100">
+              <span className="text-sm font-bold text-rose-800">Total Volume:</span>
+              <span className="text-xl font-black text-rose-600">
+                {(parseInt(leftVol) || 0) + (parseInt(rightVol) || 0)} ml
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4 shrink-0">
+            <h3 className="font-bold text-slate-700 mb-2">Detail Opsional</h3>
+            <div className="flex space-x-4">
+              <div className="flex-1">
+                <label className="block text-xs font-semibold text-slate-500 mb-2">DURASI (MENIT)</label>
+                <div className="relative">
+                  <Timer className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
+                  <input
+                    type="number" min="0"
+                    value={duration}
+                    onChange={(e) => setDuration(e.target.value)}
+                    className="w-full pl-9 pr-2 py-2 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition text-sm"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs font-semibold text-slate-500 mb-2">CATATAN</label>
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white transition text-sm"
+                  placeholder="Contoh: Power pumping..."
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-2 shrink-0">
+            <button
+              onClick={handleSavePumping}
+              disabled={!(parseInt(leftVol) > 0 || parseInt(rightVol) > 0)}
+              className="w-full bg-rose-500 hover:bg-rose-600 disabled:bg-slate-300 text-white font-bold py-4 rounded-2xl shadow-lg shadow-rose-200 transition-colors flex items-center justify-center mb-6"
+            >
+              <Save className="mr-2" size={20} /> Simpan Catatan Pompa
+            </button>
+          </div>
+
+        </div>
+      )}
     </div>
   );
 }
 
-function ChartView({ profile, logs, appId, firebaseUser, showToast }) {
+function ChartView({ profile, logs, appId, firebaseUser, showToast, onDeleteLog }) {
+  const [chartType, setChartType] = useState('baby'); // 'baby' or 'pumping'
   const [viewMode, setViewMode] = useState('mingguan'); // harian, mingguan, bulanan, tahunan
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [isEditingTarget, setIsEditingTarget] = useState(false);
+  const [newTarget, setNewTarget] = useState('');
+
+  useEffect(() => {
+    if (profile?.pumpingTarget) setNewTarget(String(profile.pumpingTarget));
+    else setNewTarget('750');
+  }, [profile]);
+
+  const handleSaveTarget = async () => {
+    const val = parseInt(newTarget);
+    if (val > 0 && firebaseUser && appId) {
+      try {
+        const profileRef = doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'profile', 'main');
+        await setDoc(profileRef, { pumpingTarget: val }, { merge: true });
+        setIsEditingTarget(false);
+        showToast("Target perah ASI diperbarui!");
+      } catch (err) {
+        showToast("Gagal memperbarui target.");
+      }
+    }
+  };
 
   const getTargetVolume = () => {
     if (!profile?.dob) return 600;
@@ -971,6 +1280,9 @@ function ChartView({ profile, logs, appId, firebaseUser, showToast }) {
 
   const getVisibleLogs = useMemo(() => {
     return logs.filter(log => {
+      if (chartType === 'baby' && log.type === 'pumping') return false;
+      if (chartType === 'pumping' && log.type !== 'pumping') return false;
+
       const logDate = new Date(log.timestamp);
       if (viewMode === 'harian') {
         return logDate.toDateString() === currentDate.toDateString();
@@ -990,20 +1302,20 @@ function ChartView({ profile, logs, appId, firebaseUser, showToast }) {
       }
       return false;
     }).sort((a, b) => b.timestamp - a.timestamp);
-  }, [logs, currentDate, viewMode]);
+  }, [logs, currentDate, viewMode, chartType]);
 
   const { chartData, displayTarget } = useMemo(() => {
     const data = [];
-    let target = dailyTarget;
+    let target = chartType === 'baby' ? dailyTarget : (profile?.pumpingTarget || 750);
 
     if (viewMode === 'harian') {
-      target = dailyTarget / 6;
+      target = chartType === 'baby' ? (dailyTarget / 6) : (target / 6);
       for (let i = 0; i < 24; i += 4) {
         const intervalLogs = getVisibleLogs.filter(l => {
           const h = new Date(l.timestamp).getHours();
           return h >= i && h < i + 4;
         });
-        const totalVol = intervalLogs.filter(l => l.type === 'volume').reduce((a, c) => a + c.amount, 0);
+        const totalVol = intervalLogs.filter(l => chartType === 'baby' ? l.type === 'volume' : l.type === 'pumping').reduce((a, c) => a + (chartType === 'baby' ? c.amount : (c.total || 0)), 0);
         data.push({
           label: `${String(i).padStart(2,'0')}:00`,
           volume: totalVol,
@@ -1018,7 +1330,7 @@ function ChartView({ profile, logs, appId, firebaseUser, showToast }) {
         const d = new Date(start);
         d.setDate(d.getDate() + i);
         const dayLogs = getVisibleLogs.filter(l => new Date(l.timestamp).toDateString() === d.toDateString());
-        const totalVol = dayLogs.filter(l => l.type === 'volume').reduce((a, c) => a + c.amount, 0);
+        const totalVol = dayLogs.filter(l => chartType === 'baby' ? l.type === 'volume' : l.type === 'pumping').reduce((a, c) => a + (chartType === 'baby' ? c.amount : (c.total || 0)), 0);
         data.push({
           label: d.toLocaleDateString('id-ID', { weekday: 'short' }),
           volume: totalVol,
@@ -1040,7 +1352,7 @@ function ChartView({ profile, logs, appId, firebaseUser, showToast }) {
           const d = new Date(l.timestamp).getDate();
           return d >= w.start && d <= w.end;
         });
-        const totalVol = weekLogs.filter(l => l.type === 'volume').reduce((a, c) => a + c.amount, 0);
+        const totalVol = weekLogs.filter(l => chartType === 'baby' ? l.type === 'volume' : l.type === 'pumping').reduce((a, c) => a + (chartType === 'baby' ? c.amount : (c.total || 0)), 0);
         const daysInWeek = w.end - w.start + 1;
         data.push({
           label: w.label,
@@ -1052,7 +1364,7 @@ function ChartView({ profile, logs, appId, firebaseUser, showToast }) {
       const months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
       for (let i = 0; i < 12; i++) {
         const monthLogs = getVisibleLogs.filter(l => new Date(l.timestamp).getMonth() === i);
-        const totalVol = monthLogs.filter(l => l.type === 'volume').reduce((a, c) => a + c.amount, 0);
+        const totalVol = monthLogs.filter(l => chartType === 'baby' ? l.type === 'volume' : l.type === 'pumping').reduce((a, c) => a + (chartType === 'baby' ? c.amount : (c.total || 0)), 0);
         const daysInMonth = new Date(currentDate.getFullYear(), i + 1, 0).getDate();
         data.push({
           label: months[i],
@@ -1062,7 +1374,7 @@ function ChartView({ profile, logs, appId, firebaseUser, showToast }) {
       }
     }
     return { chartData: data, displayTarget: target };
-  }, [getVisibleLogs, currentDate, viewMode, dailyTarget]);
+  }, [getVisibleLogs, currentDate, viewMode, dailyTarget, chartType, profile]);
 
   const maxDataValue = Math.max(...chartData.map(d => d.volume));
   const yMax = Math.max(displayTarget + (viewMode === 'harian' ? 50 : 200), maxDataValue + (viewMode === 'harian' ? 20 : 100));
@@ -1081,19 +1393,25 @@ function ChartView({ profile, logs, appId, firebaseUser, showToast }) {
     return currentDate.getFullYear().toString();
   };
 
-  const handleDeleteLog = async (logId) => {
-    if (!firebaseUser || !appId) return;
-    try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'users', firebaseUser.uid, 'logs', logId));
-      showToast("Data berhasil dihapus");
-    } catch (err) {
-      console.error(err);
-      showToast("Gagal menghapus data");
-    }
-  };
+  // Removed duplicate handleDeleteLog in ChartView since it's passed as prop onDeleteLog
 
   return (
     <div className="space-y-6 pt-2 pb-12">
+      <div className="bg-slate-200 p-1 rounded-xl flex shrink-0 mb-4 mx-4">
+        <button
+          onClick={() => setChartType('baby')}
+          className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${chartType === 'baby' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Susu Bayi
+        </button>
+        <button
+          onClick={() => setChartType('pumping')}
+          className={`flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${chartType === 'pumping' ? 'bg-white text-rose-500 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Perah ASI
+        </button>
+      </div>
+
       <div className="text-center mb-6">
         <h2 className="text-xl font-bold text-slate-800 mb-4">Grafik & Histori</h2>
         <div className="flex justify-center space-x-2 bg-slate-100 p-1 rounded-xl mx-auto w-fit">
@@ -1119,10 +1437,20 @@ function ChartView({ profile, logs, appId, firebaseUser, showToast }) {
       </div>
 
       <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 relative pt-10 pb-6">
-        <div className="absolute top-4 left-4 flex items-center space-x-2 text-[10px] font-semibold text-rose-500 bg-rose-50 px-2 py-1 rounded">
+        <div className="absolute top-4 left-4 flex items-center space-x-2 text-[10px] font-semibold text-rose-500 bg-rose-50 px-2 py-1 rounded z-20">
           <div className="w-3 h-0.5 bg-rose-500"></div>
           <span>Target {viewMode === 'harian' ? 'Per 4 Jam' : 'Rata-rata Harian'}: {Math.round(displayTarget)}ml</span>
+          {chartType === 'pumping' && (
+            <button onClick={() => setIsEditingTarget(!isEditingTarget)} className="ml-1 text-rose-700 hover:underline">Ubah</button>
+          )}
         </div>
+        {isEditingTarget && chartType === 'pumping' && (
+          <div className="absolute top-12 left-4 flex items-center space-x-2 bg-white p-2 rounded-xl border border-rose-200 shadow-md z-30">
+            <input type="number" min="0" value={newTarget} onChange={(e)=>setNewTarget(e.target.value)} className="w-16 text-xs bg-slate-50 focus:outline-none px-2 py-1 rounded border border-slate-200 font-bold" />
+            <span className="text-[10px] font-bold text-slate-400">ml/hari</span>
+            <button onClick={handleSaveTarget} className="bg-rose-500 text-white text-[10px] font-bold px-2 py-1 rounded hover:bg-rose-600">Simpan</button>
+          </div>
+        )}
 
         <div className="h-64 flex items-end justify-between space-x-1 sm:space-x-2 relative mt-4 border-b border-slate-200 pb-2">
           <div
@@ -1159,24 +1487,29 @@ function ChartView({ profile, logs, appId, firebaseUser, showToast }) {
           <ul className="space-y-3 max-h-96 overflow-y-auto pr-1 custom-scrollbar">
             {getVisibleLogs.map(log => {
               const isVol = log.type === 'volume';
+              const isPump = log.type === 'pumping';
               const timeStr = new Date(log.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
               const dateStr = new Date(log.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
               return (
                 <li key={log.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
                   <div className="flex items-center space-x-3">
-                    <div className={`p-2 rounded-full ${isVol ? 'bg-blue-100 text-blue-500' : 'bg-rose-100 text-rose-500'}`}>
-                      {isVol ? <Droplet size={16} /> : <Timer size={16} />}
+                    <div className={`p-2 rounded-full ${isVol ? 'bg-blue-100 text-blue-500' : isPump ? 'bg-rose-100 text-rose-500' : 'bg-rose-100 text-rose-500'}`}>
+                      {isVol || isPump ? <Droplet size={16} /> : <Timer size={16} />}
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-slate-700">{isVol ? 'Minum Susu' : 'Menyusui Langsung'}</p>
-                      <p className="text-[10px] text-slate-500">{dateStr} • {timeStr}</p>
+                      <p className="text-sm font-semibold text-slate-700">{isVol ? 'Minum Susu' : isPump ? 'Perah ASI' : 'Menyusui Langsung'}</p>
+                      <p className="text-[10px] text-slate-500">
+                        {dateStr} • {timeStr}
+                        {log.duration > 0 && ` • Durasi: ${log.duration} menit`}
+                      </p>
+                      {log.notes && <p className="text-[9px] text-slate-400 mt-0.5 italic max-w-[120px] truncate">"{log.notes}"</p>}
                     </div>
                   </div>
                   <div className="flex items-center space-x-3">
                     <span className={`font-bold font-mono text-sm ${isVol ? 'text-blue-600' : 'text-rose-600'}`}>
-                      {isVol ? `${log.amount}ml` : formatTime(log.amount)}
+                      {isVol ? `${log.amount}ml` : isPump ? `${log.total}ml` : formatTime(log.amount)}
                     </span>
-                    <button onClick={() => handleDeleteLog(log.id)} className="text-slate-300 hover:text-rose-500 transition">
+                    <button onClick={() => onDeleteLog(log.id)} className="text-slate-300 hover:text-rose-500 transition">
                       <Trash2 size={14} />
                     </button>
                   </div>
